@@ -1,0 +1,79 @@
+lockfile_version: '1'
+dependencies: []
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/skills/go-temporal-review
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/go-temporal-review/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:37b9cc12f3275361a297a0adea988e90368b4be577f75fa64102c78aaf833e15
+- kind: project-relative
+  target: claude
+  value: .claude/skills/go-temporal-review/references/checklist.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:7dad38a4799eeda6ab6e7fd67f5bb4be4906b561a94bcff79dfd0bcfa9286703
+- kind: project-relative
+  target: claude
+  value: .claude/skills/session-retro
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/session-retro/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2ec2b2c931687c6d8dfe188999c7a9ff44e6d4a4923a694a81ee87792e145bb6
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-authoring
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-authoring/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:74cedbc5be6851f76fb341883276ae1f7c885e01f8ebe39857c04ecb8eb09a5d
+local_deployed_files:
+- .claude/skills/go-temporal-review
+- .claude/skills/go-temporal-review/SKILL.md
+- .claude/skills/go-temporal-review/references/checklist.md
+- .claude/skills/session-retro
+- .claude/skills/session-retro/SKILL.md
+- .claude/skills/skill-authoring
+- .claude/skills/skill-authoring/SKILL.md
+local_deployed_file_hashes:
+  .claude/skills/go-temporal-review/SKILL.md: sha256:37b9cc12f3275361a297a0adea988e90368b4be577f75fa64102c78aaf833e15
+  .claude/skills/go-temporal-review/references/checklist.md: sha256:7dad38a4799eeda6ab6e7fd67f5bb4be4906b561a94bcff79dfd0bcfa9286703
+  .claude/skills/session-retro/SKILL.md: sha256:2ec2b2c931687c6d8dfe188999c7a9ff44e6d4a4923a694a81ee87792e145bb6
+  .claude/skills/skill-authoring/SKILL.md: sha256:74cedbc5be6851f76fb341883276ae1f7c885e01f8ebe39857c04ecb8eb09a5d

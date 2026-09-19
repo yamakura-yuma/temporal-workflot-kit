@@ -1,0 +1,31 @@
+services:
+  temporal:
+    build: .
+    command: ["temporal", "server", "start-dev", "--ip", "0.0.0.0", "--headless"]
+    ports:
+      - "7233:7233"
+
+  worker:
+    build: .
+    command: ["go", "run", "./cmd/worker"]
+    environment:
+      TEMPORAL_ADDRESS: "temporal:7233"
+    volumes:
+      - go-mod-cache:/root/go
+    depends_on:
+      - temporal
+
+  starter:
+    build: .
+    command: ["go", "run", "./cmd/starter"]
+    environment:
+      TEMPORAL_ADDRESS: "temporal:7233"
+    volumes:
+      - go-mod-cache:/root/go
+    depends_on:
+      - temporal
+    profiles:
+      - starter
+
+volumes:
+  go-mod-cache:

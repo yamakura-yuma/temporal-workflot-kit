@@ -1,0 +1,14 @@
+name: temporal-saga
+version: 1.0.0
+description: Skills and agent primitives for the temporal-saga project
+author: yamakura-yuma
+# Which agent platforms to deploy to.
+# Resolution order: --target flag > this field > auto-detect from filesystem.
+# Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, hermes, kiro, opencode, vscode, windsurf
+targets:
+- claude
+dependencies:
+  apm: []
+  mcp: []
+includes: auto
+scripts: {}

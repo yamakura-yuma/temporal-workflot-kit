@@ -1,0 +1,16 @@
+# Go
+/bin/
+*.exe
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+
+# APM dependencies
+apm_modules/
+
+# Graphify local knowledge graph (machine-local, rebuilds via `graphify update .`)
+graphify-out/
