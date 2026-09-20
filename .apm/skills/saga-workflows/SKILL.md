@@ -71,10 +71,14 @@ Temporal のインメモリのテスト環境は、**キャンセルされた co
   `Unwrap() error` を辿る型スイッチなので、join したエラーは型名 `joinError`、原因
   チェーン無しで記録され、`NonRetryableErrorTypes` の照合も効かなくなる。
 - **補償の予算は必須。** disconnected context は外から誰もキャンセルできないため。
-- **ステップはアクティビティに限らない。** `ChildStep` が子ワークフローを同じ形で
-  扱う。中核（補償を先に積む、同じ鍵、逆順、予算）は `saga/step.go` の `register` に
-  あり、executor ごとに違うのは3点だけ（実行の呼び出し、鍵を載せる場所、予算で切る
-  対象）。ローカルアクティビティは `LocalActivityOptions` に ID が無いので対象外。
+- **ステップはアクティビティに限らない。** `ChildStep` が子ワークフローを、`SignalStep`
+  が外部ワークフローへの signal を、同じ形で扱う。中核（補償を先に積む、同じ鍵、逆順、
+  予算）は `saga/step.go` の `register` にあり、executor ごとに違うのは3点だけ（実行の
+  呼び出し、鍵を載せる場所、予算で切る対象）。`SignalStep` には鍵が載らないので、受け手
+  側の冪等性は受け手の責任と明記すること。ローカルアクティビティは
+  `LocalActivityOptions` に ID が無いので対象外。
+- **`AwaitSignal` はステップではない。** 待つことに副作用が無いので何も登録しない。
+  `Saga` を取るのは、ステップが失敗していたら待たずに返すため。
 
 ## saga のステップを足す
 

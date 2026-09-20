@@ -23,6 +23,7 @@ import (
 
 	"github.com/yamakura-yuma/temporal-saga/example/approval"
 	"github.com/yamakura-yuma/temporal-saga/example/childflow"
+	"github.com/yamakura-yuma/temporal-saga/example/external"
 	"github.com/yamakura-yuma/temporal-saga/example/order"
 	"github.com/yamakura-yuma/temporal-saga/example/pipeline"
 	"github.com/yamakura-yuma/temporal-saga/example/state"
@@ -38,6 +39,7 @@ var (
 	pipelineWorker  worker.Worker
 	childflowWorker worker.Worker
 	stateWorker     worker.Worker
+	externalWorker  worker.Worker
 	ledger          *order.Ledger
 	pipelineLedger  *pipeline.Ledger
 	childflowLedger *childflow.Ledger
@@ -115,9 +117,20 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	if err := stateWorker.Start(); err != nil {
 		fail("start the state worker: %v", err)
 	}
+
+	externalWorker = worker.New(temporalClient, external.TaskQueue, worker.Options{})
+	externalWorker.RegisterWorkflow(external.ExternalWorkflow)
+	externalWorker.RegisterWorkflow(external.InventoryWorkflow)
+	externalWorker.RegisterActivity(external.NewActivities(external.NewLedger()))
+	if err := externalWorker.Start(); err != nil {
+		fail("start the external worker: %v", err)
+	}
 }, []string{}, testsuit.AND)
 
 var _ = gauge.AfterSuite(func(*m.ExecutionInfo) {
+	if externalWorker != nil {
+		externalWorker.Stop()
+	}
 	if stateWorker != nil {
 		stateWorker.Stop()
 	}

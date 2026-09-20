@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>childflow — ステップが子ワークフロー — temporal-saga example</title>
+<title>external — signal で他のワークフローを動かす — temporal-saga example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -75,10 +75,10 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="diagram.html" class="here">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="diagram.html" class="here">external</a></nav>
 
-<h1>childflow — ステップが子ワークフロー<span class="path">example/childflow/</span></h1>
-<p>ステップはアクティビティに限りません。梱包だけを子ワークフローにして、取り消しも子ワークフローで行います。<strong>混在しても巻き戻しは1つの逆順</strong>です。</p>
+<h1>external — signal で他のワークフローを動かす<span class="path">example/external/</span></h1>
+<p>在庫が長命のワークフローの中にある場合。saga は signal で押さえ、失敗したら signal で戻します。<strong>3つ目の executor</strong>で、3つの中では一番弱い形です。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -87,72 +87,63 @@
     <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
   </div>
 
-<h2>ship で失敗したとき</h2>
+<h2>charge で失敗したとき</h2>
+<p>
+  在庫は長命の <code>InventoryWorkflow</code> の中にあります。saga は「押さえろ」と signal を
+  送り、後のステップが失敗したら「戻せ」と signal を送ります。
+</p>
 <div class="strip">
-  <div class="lane"><span class="tag">forward</span></div>
+  <div class="lane"><span class="tag">saga</span></div>
   <div class="row">
-    <div class="cell f">reserve<span class="sub2">アクティビティ</span></div>
+    <div class="cell f">hold<span class="sub2">SignalStep</span></div>
     <div class="arr">→</div>
-    <div class="cell c">pack<span class="sub2">PackWorkflow（子）</span></div>
-    <div class="arr">→</div>
-    <div class="cell u">ship ✕<span class="sub2">アクティビティ</span></div>
+    <div class="cell u">charge ✕<span class="sub2">card declined</span></div>
   </div>
-  <div class="fail-mark">▼ executor が違っても1つの逆順</div>
-  <div class="lane"><span class="tag">補償</span></div>
+  <div class="fail-mark">▼</div>
   <div class="row">
-    <div class="cell u">reserve:undo</div>
+    <div class="cell u">hold:undo<span class="sub2">release を送る</span></div>
     <div class="arr">←</div>
-    <div class="cell c">pack:undo<span class="sub2">UnpackWorkflow（子）</span></div>
-    <div class="arr">←</div>
-    <div class="cell u">ship:undo</div>
+    <div class="cell u">charge:undo</div>
+  </div>
+  <div class="fail-mark q">│ signal ↓ ↑ 同じ payload（HoldReq）</div>
+  <div class="lane"><span class="tag">別のワークフロー</span><span class="note">saga のことを知らない</span></div>
+  <div class="row">
+    <div class="cell s" style="flex:0 0 auto;padding:9px 22px">InventoryWorkflow<span class="sub2">held["widget"]: 2 → 0</span></div>
   </div>
 </div>
 
-<h2>executor ごとに違うのは3点だけ</h2>
+<div class="note-box">
+  <strong>このステップには冪等キーが載りません。</strong> <code>SignalExternalWorkflow</code>
+  には options 構造体が無く、<code>ActivityID</code> や <code>WorkflowID</code> に相当する
+  フィールドがありません。saga が保証するのは<strong>対になっていること</strong>だけです。
+  押さえた後に失敗したら必ず戻す。受け手が同じ signal を2回受けても壊れないようにするのは
+  <strong>受け手の責任</strong>です。
+</div>
+
+<pre><code>saga.SignalStep(ctx, s, "hold",
+    saga.Signal{WorkflowID: in.Inventory, Name: HoldSignal},     // forward
+    saga.Signal{WorkflowID: in.Inventory, Name: ReleaseSignal},  // 補償
+    HoldReq{Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})</code></pre>
+
+<p>補償は forward と同じ payload を受け取るので、<strong>押さえた分だけを正確に戻せます</strong>。</p>
+
+<h2>3つ目の executor</h2>
 <table>
-  <tr><th></th><th>実行</th><th>冪等キーを載せる場所</th><th>予算で切る対象</th></tr>
-  <tr>
-    <td><strong>アクティビティ</strong><br><code>saga.Step</code></td>
-    <td><code>ExecuteActivity</code></td>
-    <td><code>ActivityOptions.ActivityID</code></td>
-    <td><code>ScheduleToCloseTimeout</code></td>
-  </tr>
-  <tr>
-    <td><strong>子ワークフロー</strong><br><code>saga.ChildStep</code></td>
-    <td><code>ExecuteChildWorkflow</code></td>
-    <td><code>ChildWorkflowOptions.WorkflowID</code></td>
-    <td><code>WorkflowExecutionTimeout</code></td>
-  </tr>
-  <tr>
-    <td><strong>ローカルアクティビティ</strong><br>対象外</td>
-    <td><code>ExecuteLocalActivity</code></td>
-    <td style="color:var(--undo)"><strong>無い</strong></td>
-    <td><code>ScheduleToCloseTimeout</code></td>
-  </tr>
+  <tr><th></th><th>実行</th><th>冪等キー</th><th>予算で切る対象</th></tr>
+  <tr><td><code>saga.Step</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
+  <tr><td><code>saga.ChildStep</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
+  <tr><td><code>saga.SignalStep</code></td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
 </table>
 
-<p>
-  どちらを呼ぶかは<strong>第1引数の型が選びます</strong>。<code>context.Context</code> なら
-  アクティビティ、<code>workflow.Context</code> なら子ワークフロー。Temporal 自身の区別と
-  同じなので、名前ではなく型が教えてくれます。
-</p>
+<div class="spec"><b>## 失敗すると、押さえた在庫が signal で戻される</b>
 
-<pre><code>res,  _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
-
-// 子の側は自分の鍵を読む。":undo" は剥がされているので forward と同じ値
-key, _ := saga.IdempotencyKeyOf(ctx)</code></pre>
-
-<div class="spec"><b>## 子ワークフローのステップも逆順で取り消される</b>
-
-* 子ワークフローを含む注文 "mixed" を "ship" で失敗させる
-* saga は "no carrier available" で失敗する
-* 子ワークフロー "pack, pack:undo" が起動された
-* 梱包と取り消しが見た冪等キーは一致する
-* 注文は "reserve, ship" を保持していない</div>
+* 在庫ワークフロー "inv-fail" を起動する
+* 在庫を押さえる注文 "ext-fail" を "charge" で失敗させる
+* saga は "card declined" で失敗する
+* 在庫ワークフロー "inv-fail" の "widget" の確保数は "0"</div>
 
 <footer>
-  ソース: <code>example/childflow/</code> ／ 仕様: <code>docs/specs/</code> ／
+  ソース: <code>example/external/</code> ／ 仕様: <code>docs/specs/</code> ／
   形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
   設計の理由: <a href="../../docs/design.md">design.md</a>
 </footer>

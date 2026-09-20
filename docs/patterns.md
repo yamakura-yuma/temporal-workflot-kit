@@ -11,7 +11,8 @@
 | ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildStep` でステップになる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
 | アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
 | `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
-| signal を挟むには | `workflow.Selector` で待つ。分岐の前に `s.Err()` を見る | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
+| signal を待つには | `saga.AwaitSignal`。ステップが失敗していれば待たない | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
+| signal を送るステップは書けるか | 書ける。`saga.SignalStep`。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
 | 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
 ---
@@ -109,9 +110,13 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 `defer` を利用者に書かせる形は、書き忘れると補償ゼロのまま「成功」になるので採っていません
 （[design.md](design.md) の項目4）。
 
-## signal を挟む
+## signal を待つ
 
-`workflow.Selector` で待ちます。saga の外側の話なので、ライブラリは何も関与しません。
+`saga.AwaitSignal` を使います。待つこと自体は副作用ではないのでステップではありません。
+取り消すものが無いからです。
+
+ライブラリに置いてある理由は1つだけ。**ステップが既に失敗していれば、待たずに返ります。**
+ロールバックに向かっている saga が、人の承認を1時間待って止まるのを避けるためです。
 
 ```go
 res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
@@ -122,7 +127,7 @@ if err := s.Err(); err != nil {
     return Receipt{}, err
 }
 
-decision, ok := awaitDecision(ctx, wait)
+decision, ok := saga.AwaitSignal[Decision](ctx, s, "approval", time.Minute)
 if !ok || !decision.Approved {
     // エラーを返すだけでロールバックが走る
     return Receipt{}, temporal.NewApplicationError("rejected", DeniedType, nil)
@@ -131,3 +136,21 @@ if !ok || !decision.Approved {
 
 待っている間にワークフローがキャンセルされても、補償は走ります。切り離した context で
 実行されるからです。
+
+## signal を送るステップ
+
+他のワークフローが持っている状態を動かすステップは `saga.SignalStep` で書けます。補償は
+打ち消しの signal です。
+
+```go
+saga.SignalStep(ctx, s, "hold",
+    saga.Signal{WorkflowID: in.Inventory, Name: HoldSignal},     // forward
+    saga.Signal{WorkflowID: in.Inventory, Name: ReleaseSignal},  // 補償
+    HoldReq{Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+```
+
+補償は forward と同じ payload を受け取るので、押さえた分だけを正確に戻せます。
+
+**3つの executor の中では一番弱い形です。** `SignalExternalWorkflow` には options 構造体が
+無く、冪等キーを載せる場所がありません。saga が保証するのは対になっていることだけで、
+同じ signal を2回受けても壊れないようにするのは受け手の責任です。

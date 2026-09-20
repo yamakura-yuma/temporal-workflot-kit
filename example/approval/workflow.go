@@ -71,7 +71,9 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (order.Receipt, error) {
 			return order.Receipt{}, err
 		}
 
-		decision, ok := awaitDecision(ctx, wait)
+		// s.Err() が立っていれば待たずに返る。失敗した saga が人の承認を
+		// 待って止まらないように、この判断はライブラリ側にある。
+		decision, ok := saga.AwaitSignal[Decision](ctx, s, ApprovalSignal, wait)
 		if !ok {
 			// Returning an error is the whole rollback trigger. Run releases
 			// the reservation on the way out.
@@ -88,28 +90,4 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (order.Receipt, error) {
 
 		return order.Receipt{Reservation: res, Charge: chg}, nil
 	})
-}
-
-// awaitDecision blocks until a decision arrives or the deadline passes. The
-// second result reports whether a decision arrived.
-//
-// A cancellation while waiting leaves both futures unresolved and the workflow
-// function returns through saga.Run, which compensates on a disconnected
-// context. Nothing here has to know about that.
-func awaitDecision(ctx workflow.Context, wait time.Duration) (Decision, bool) {
-	var (
-		decision Decision
-		arrived  bool
-	)
-
-	selector := workflow.NewSelector(ctx)
-	selector.AddReceive(workflow.GetSignalChannel(ctx, ApprovalSignal),
-		func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, &decision)
-			arrived = true
-		})
-	selector.AddFuture(workflow.NewTimer(ctx, wait), func(workflow.Future) {})
-
-	selector.Select(ctx)
-	return decision, arrived
 }

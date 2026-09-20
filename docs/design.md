@@ -443,13 +443,20 @@ SDK を確認すると、executor ごとに違うのは3点だけです。
 | --- | --- | --- | --- |
 | アクティビティ | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
 | 子ワークフロー | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
+| 外部への signal | `SignalExternalWorkflow` | **無い** | 無い（コマンドなので即応答） |
 
 ### このライブラリだと
 
-中核を `register` に切り出し、上の3点だけを差し替えた `ChildStep` を用意しています。
+中核を `register` に切り出し、上の3点だけを差し替えた `ChildStep` と `SignalStep` を
+用意しています。
 
 ```go
 pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+
+saga.SignalStep(ctx, s, "hold",
+    saga.Signal{WorkflowID: inventory, Name: "hold"},
+    saga.Signal{WorkflowID: inventory, Name: "release"},
+    HoldReq{SKU: in.SKU})
 ```
 
 形は `Step` と同じ。`fwd` が値とエラーを返し `undo` がエラーだけを返す非対称も同じなので、
@@ -458,6 +465,14 @@ pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{
 
 混在した saga は1つの逆順で巻き戻ります。補償のレジストリは元から
 `func(workflow.Context) error` を持っているだけで、executor を区別していないからです。
+
+### signal のステップが一番弱い理由
+
+`SignalStep` は成立しますが、`SignalExternalWorkflow` には options 構造体が無いので
+**冪等キーを載せる場所がありません**。対になっていることは保証できても、受け手が同じ
+signal を2回受けたときに壊れないようにするのは受け手の責任です。形が `Step` と違うのも
+そのためで、signal は関数呼び出しではないので `fwd`/`undo` に関数ではなく宛先
+（`Signal`）を取ります。
 
 ### ローカルアクティビティを外した理由
 
@@ -478,6 +493,6 @@ pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{
 | エラーを溜めて後で見る | 見忘れると壊れた成功になる | `Run` が本体の戻り値を信用しない |
 | `any` で関数を受ける | 取り違えが取り消し中に発覚 | 型で受けてコンパイルエラーに |
 | `errors.Join` で束ねる | 履歴から原因が消える | 1本鎖の `ApplicationError` |
-| ステップをアクティビティに限る | 子ワークフローが巻き戻しに乗らない | `ChildStep` で同じ形のまま扱う |
+| ステップをアクティビティに限る | 子ワークフローや外部への signal が巻き戻しに乗らない | `ChildStep` と `SignalStep` |
 
 塞げていない穴は [activity-contract.md](activity-contract.md) に書いてあります。

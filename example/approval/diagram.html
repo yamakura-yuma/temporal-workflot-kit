@@ -75,7 +75,7 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="diagram.html" class="here">approval</a></nav>
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="diagram.html" class="here">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
 <h1>approval — ステップの間で人を待つ<span class="path">example/approval/</span></h1>
 <p>ステップの間で signal を待ちます。saga の外側の話なので、ライブラリは関与しません。</p>
@@ -117,7 +117,9 @@ if err := s.Err(); err != nil {   // 分岐の前に必ず見る
     return order.Receipt{}, err   // 失敗していれば res はゼロ値
 }
 
-decision, ok := awaitDecision(ctx, wait)
+// s.Err() が立っていれば待たずに返る。失敗した saga が
+// 人の承認を待って止まらないように、この判断はライブラリ側にある
+decision, ok := saga.AwaitSignal[Decision](ctx, s, ApprovalSignal, wait)
 if !ok || !decision.Approved {
     // エラーを返すだけ。ロールバックは Run が引き受ける
     return order.Receipt{}, temporal.NewApplicationError("...", DeniedType, nil)

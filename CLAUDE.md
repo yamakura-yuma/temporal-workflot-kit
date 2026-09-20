@@ -29,6 +29,7 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 - `example/pipeline/` — 前段の出力が次段の入力になる例
 - `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例
 - `example/childflow/` — ステップが子ワークフローの例（`saga.ChildStep`）
+- `example/external/` — signal で他のワークフローを動かす例（`saga.SignalStep`）
 
 example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。
 

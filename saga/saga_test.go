@@ -520,3 +520,64 @@ func TestChildStepCompensatesInOneOrder(t *testing.T) {
 	require.NotEmpty(t, keys["do:b"])
 	require.NotEmpty(t, keys["undo:b"])
 }
+
+// --- waiting for a signal ----------------------------------------------------
+
+// awaitWorkflow waits an hour for a signal that never comes. When failFirst is
+// set, a step fails before the wait.
+func awaitWorkflow(ctx workflow.Context, failFirst bool) (bool, error) {
+	var a *acts
+	once := &temporal.RetryPolicy{MaximumAttempts: 1}
+
+	return saga.Run(ctx, saga.Options{
+		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
+		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
+		CompensationBudget:  5 * time.Minute,
+	}, func(ctx workflow.Context, s *saga.Saga) (bool, error) {
+		if failFirst {
+			saga.Step(ctx, s, "a", a.Do, a.Undo, req{Step: "a", Fail: true})
+		}
+
+		_, arrived := saga.AwaitSignal[string](ctx, s, "never", time.Hour)
+		return arrived, s.Err()
+	})
+}
+
+// With no failure, the wait runs its full course.
+func TestAwaitSignalWaitsForItsTimeout(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	env.RegisterWorkflow(awaitWorkflow)
+	env.RegisterActivity(&acts{r: newRecorder()})
+
+	start := env.Now()
+	env.ExecuteWorkflow(awaitWorkflow, false)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.GreaterOrEqual(t, env.Now().Sub(start), time.Hour,
+		"without a failure the wait should run to its timeout")
+}
+
+// After a step has failed there is nothing left to approve, so the wait is
+// skipped. A saga on its way to being rolled back must not sit for an hour
+// waiting for a human.
+func TestAwaitSignalSkipsAfterAFailedStep(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	r := newRecorder()
+	env.RegisterWorkflow(awaitWorkflow)
+	env.RegisterActivity(&acts{r: r})
+
+	start := env.Now()
+	env.ExecuteWorkflow(awaitWorkflow, true)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+	require.Less(t, env.Now().Sub(start), time.Hour,
+		"the wait should be skipped once a step has failed")
+
+	calls, _ := r.snapshot()
+	require.Equal(t, []string{"do:a", "undo:a"}, calls,
+		"and the rollback should still happen")
+}
