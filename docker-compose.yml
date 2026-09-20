@@ -1,0 +1,47 @@
+# One image (Dockerfile -> Go + temporal-cli via Nix) backs every service, so
+# the build is shared instead of repeated per service.
+x-dev: &dev
+  build: .
+  image: temporal-saga-dev
+  environment:
+    TEMPORAL_ADDRESS: "temporal:7233"
+  volumes:
+    # Bind-mounted so edits on the host take effect without rebuilding the
+    # image; the caches are named volumes so they survive `docker compose down`.
+    - .:/workspace
+    - go-mod-cache:/root/go
+    - go-build-cache:/root/.cache/go-build
+
+services:
+  temporal:
+    build: .
+    image: temporal-saga-dev
+    command: ["temporal", "server", "start-dev", "--ip", "0.0.0.0", "--headless"]
+    ports:
+      - "7233:7233"
+
+  worker:
+    <<: *dev
+    command: ["go", "run", "./cmd/worker"]
+    depends_on:
+      - temporal
+
+  starter:
+    <<: *dev
+    command: ["go", "run", "./cmd/starter"]
+    depends_on:
+      - temporal
+    profiles:
+      - starter
+
+  # Ad-hoc commands (`just build`, `just test`, `just shell`, ...). Profiled so
+  # `docker compose up` never starts it; `docker compose run` does regardless.
+  # No depends_on: `go test` should not spin up a Temporal server.
+  dev:
+    <<: *dev
+    profiles:
+      - dev
+
+volumes:
+  go-mod-cache:
+  go-build-cache:

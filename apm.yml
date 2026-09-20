@@ -1,0 +1,35 @@
+name: temporal-saga
+version: 1.0.0
+description: Agent configuration for the temporal-saga project
+author: yamakura-yuma
+
+# Which agent platforms to deploy to.
+# Resolution order: --target flag > this field > auto-detect from filesystem.
+# Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, hermes, kiro, opencode, vscode, windsurf
+targets:
+- claude
+
+# Two sources, one deploy. `apm install` here lands both in ./.claude/ (never
+# ~/.claude/):
+#
+#   ./.apm/        this project's own domain knowledge — the saga conventions
+#                  and the review checklist that name this repo's code.
+#   core-principal the shared harness (rules, guard hooks, core-* skills) from
+#                  the dotfiles repo, pinned by commit because upstream
+#                  publishes no tags; bump with `apm update`.
+#
+# The dividing line is whether it would read the same in another repo. If it
+# would, it belongs in core-principal, not in ./.apm/ — a local fork of a shared
+# skill is the thing to avoid.
+dependencies:
+  apm:
+  - git: https://github.com/yamakura-yuma/dotfiles.git
+    path: core-principal
+    ref: aaad378e24c129cf91aea6c9a2dc176f4211b3a5
+    alias: core-principal
+    targets:
+    - claude
+  mcp: []
+
+includes: auto
+scripts: {}
