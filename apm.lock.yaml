@@ -4,9 +4,9 @@ dependencies:
 - repo_url: yamakura-yuma/dotfiles
   name: core-principal
   host: github.com
-  resolved_commit: aaad378e24c129cf91aea6c9a2dc176f4211b3a5
-  resolved_ref: aaad378e24c129cf91aea6c9a2dc176f4211b3a5
-  version: 1.0.0
+  resolved_commit: 098176e47d93c136cbc9f7713abe559e75829a42
+  resolved_ref: 098176e47d93c136cbc9f7713abe559e75829a42
+  version: 1.1.0
   virtual_path: core-principal
   is_virtual: true
   package_type: apm_package
@@ -34,7 +34,7 @@ dependencies:
     .claude/skills/core-harness/SKILL.md: sha256:99c045d95e8dc280ded6ea6b097a2be74250332c29ed88d4f234484f2cfc88f0
     .claude/skills/core-retro/SKILL.md: sha256:eb696797ce02014584b939277d35552c9f02844402d480fb97f152bf56969c09
     .claude/skills/core-tools/SKILL.md: sha256:14ae4206d3a5b10d5d68c8720f7357f5a218d3b509e59bcb2e00ad8a88fb8fe2
-  content_hash: sha256:f760e9977f29814b345685e9d85c81915664ec3a256ee2ad61097bf3a23eb8aa
+  content_hash: sha256:6702e2639a56d5fca62b4fec0647c242ac27f42854b083cb57adabda912d66bb
   target_subset:
   - claude
 - repo_url: dietrichgebert/ponytail
@@ -149,6 +149,27 @@ dependencies:
   deployed_file_hashes:
     .claude/skills/ponytail-review/SKILL.md: sha256:40df33b58fc6ef889b93585733feb9566b76e9586efa7f376785c1e995197ac0
   content_hash: sha256:4646594fcd75455533f7ff1425f4f1c5ba0fa65f88241bf262b1c4fc275f049a
+  target_subset:
+  - claude
+- repo_url: gonta223/humanizer-ja
+  name: humanizer-ja
+  host: github.com
+  resolved_commit: a1e343696e43aa50e7218891f3319ab22cde3464
+  resolved_ref: a1e343696e43aa50e7218891f3319ab22cde3464
+  version: unknown
+  depth: 2
+  resolved_by: yamakura-yuma/dotfiles
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/humanizer-ja
+  - .claude/skills/humanizer-ja/LICENSE
+  - .claude/skills/humanizer-ja/README.md
+  - .claude/skills/humanizer-ja/SKILL.md
+  deployed_file_hashes:
+    .claude/skills/humanizer-ja/LICENSE: sha256:f75eb14ec27966cd36603902343e942aa1d125e7ef78cfb786ba71b29938b7dc
+    .claude/skills/humanizer-ja/README.md: sha256:657ca8e0e1750c2eb025e6e61fe229bc9eafcea3ac53694a12f69399a1a29872
+    .claude/skills/humanizer-ja/SKILL.md: sha256:3fe07f06a179801d7445eff19ed40f1681ef9860665c50c1e9a032f6dffead89
+  content_hash: sha256:b6da4ef92a941ab364ab1ddf259d9e511e098a0719f7ee2202847351c34a8194
   target_subset:
   - claude
 - repo_url: humanlayer/skills
@@ -1113,6 +1134,42 @@ deployments:
   - mattpocock/skills/skills/productivity/handoff
   active_owner: mattpocock/skills/skills/productivity/handoff
   content_hash: sha256:5c479fd562c691851690e8b18c8501045bef0943c10743d636b2fae26add1d28
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja/LICENSE
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: sha256:f75eb14ec27966cd36603902343e942aa1d125e7ef78cfb786ba71b29938b7dc
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja/README.md
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: sha256:657ca8e0e1750c2eb025e6e61fe229bc9eafcea3ac53694a12f69399a1a29872
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: sha256:3fe07f06a179801d7445eff19ed40f1681ef9860665c50c1e9a032f6dffead89
 - kind: project-relative
   target: claude
   value: .claude/skills/japanese-tech-writing
