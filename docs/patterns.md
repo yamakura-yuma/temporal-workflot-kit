@@ -11,7 +11,7 @@
 | ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildStep` でステップになる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
 | アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
 | `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
-| signal を待つには | `saga.AwaitSignal`。ステップが失敗していれば待たない | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
+| signal を待つには | `saga.InlineStep` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
 | signal を送るステップは書けるか | 書ける。`saga.SignalStep`。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
 | 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
@@ -112,30 +112,50 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 
 ## signal を待つ
 
-`saga.AwaitSignal` を使います。待つこと自体は副作用ではないのでステップではありません。
-取り消すものが無いからです。
-
-ライブラリに置いてある理由は1つだけ。**ステップが既に失敗していれば、待たずに返ります。**
-ロールバックに向かっている saga が、人の承認を1時間待って止まるのを避けるためです。
+待つ処理も**ステップにします**。`saga.InlineStep` が、利用者の書いたワークフローコードを
+その場で呼んでステップに変えます。
 
 ```go
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+```
 
-decision, ok := saga.AwaitSignal[Decision](ctx, s, "approval", time.Minute)
-if !ok || !decision.Approved {
-    // エラーを返すだけでロールバックが走る
-    return Receipt{}, temporal.NewApplicationError("rejected", DeniedType, nil)
+判断は `awaitApproval` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
+関数の中に閉じ込めるのと、同じ立ち位置です。
+
+```go
+func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
+    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+    if !ok {
+        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+    }
+    if !decision.Approved {
+        return Decision{}, temporal.NewApplicationError("rejected by "+decision.By, DeniedType, nil)
+    }
+    return decision, nil
 }
 ```
 
-**`s.Err()` のガードは要りません。** `reserve` が失敗していれば `AwaitSignal` は待たずに
-返り、body はここで「誰も承認しなかった」というエラーを返しますが、`Run` は**最初の失敗**
-（予約の失敗）を報告します。握って自分のエラーを返したいときだけ、先に `s.Clear()` を
-呼んでください。
+ステップなので、**先のステップが失敗していれば飛ばされます**。ロールバックに向かっている
+saga が人の承認を1時間待って止まることはありません。
 
-ただし**ライブラリが面倒を見られるのはステップと `AwaitSignal` だけ**です。`s.Err()` が
-立った後も、ログ・`workflow.Sleep`・自前の分岐は普通に実行されます。ゼロ値で分岐する
-コードを書くなら、そこは自分で `s.Err()` を見てください。
+`InlineStep` は signal 専用ではありません。ワークフローの中で実行する必要があって、かつ
+saga を失敗させうるもの全般に使えます。`workflow.Await` で条件を待つ、経路を選ぶ、など。
+
+本体はステップの列のままになります。
+
+```go
+res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
+```
+
+**`s.Err()` のガードは要りません。** ステップが失敗していれば以降のステップは飛ばされ、
+`Run` は**最初の失敗**を報告します。握って自分のエラーを返したいときだけ、先に
+`s.Clear()` を呼んでください。
+
+ただし**ライブラリが面倒を見られるのはステップの中だけ**です。`s.Err()` が立った後も、
+ログ・`workflow.Sleep`・本体に直接書いた分岐は普通に実行されます。ステップの外でゼロ値を
+使うなら、そこは自分で `s.Err()` を見てください。
 
 待っている間にワークフローがキャンセルされても、補償は走ります。切り離した context で
 実行されるからです。

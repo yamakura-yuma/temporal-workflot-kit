@@ -523,9 +523,19 @@ func TestChildStepCompensatesInOneOrder(t *testing.T) {
 
 // --- waiting for a signal ----------------------------------------------------
 
+// waitStep is the wait written the way the library intends: a step of its own,
+// which decides for itself what a missing signal means.
+func waitStep(ctx workflow.Context, _ struct{}) (string, error) {
+	payload, arrived := saga.AwaitSignal[string](ctx, "never", time.Hour)
+	if !arrived {
+		return "", temporal.NewApplicationError("nobody answered", "NoAnswer", nil)
+	}
+	return payload, nil
+}
+
 // awaitWorkflow waits an hour for a signal that never comes. When failFirst is
 // set, a step fails before the wait.
-func awaitWorkflow(ctx workflow.Context, failFirst bool) (bool, error) {
+func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
@@ -533,18 +543,17 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (bool, error) {
 		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
 		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
 		CompensationBudget:  5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (bool, error) {
+	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		if failFirst {
 			saga.Step(ctx, s, "a", a.Do, a.Undo, req{Step: "a", Fail: true})
 		}
-
-		_, arrived := saga.AwaitSignal[string](ctx, s, "never", time.Hour)
-		return arrived, s.Err()
+		return saga.InlineStep(ctx, s, "wait", waitStep, nil, struct{}{})
 	})
 }
 
-// With no failure, the wait runs its full course.
-func TestAwaitSignalWaitsForItsTimeout(t *testing.T) {
+// With no failure, the wait runs its full course and its own verdict is what
+// fails the saga.
+func TestInlineStepRunsAndDecides(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
 	env.RegisterWorkflow(awaitWorkflow)
@@ -554,15 +563,16 @@ func TestAwaitSignalWaitsForItsTimeout(t *testing.T) {
 	env.ExecuteWorkflow(awaitWorkflow, false)
 
 	require.True(t, env.IsWorkflowCompleted())
-	require.NoError(t, env.GetWorkflowError())
+	require.ErrorContains(t, env.GetWorkflowError(), "nobody answered",
+		"the step decides what a missing signal means")
 	require.GreaterOrEqual(t, env.Now().Sub(start), time.Hour,
-		"without a failure the wait should run to its timeout")
+		"without an earlier failure the wait should run to its timeout")
 }
 
 // After a step has failed there is nothing left to approve, so the wait is
-// skipped. A saga on its way to being rolled back must not sit for an hour
-// waiting for a human.
-func TestAwaitSignalSkipsAfterAFailedStep(t *testing.T) {
+// skipped like any other step. A saga on its way to being rolled back must not
+// sit for an hour waiting for a human.
+func TestInlineStepSkipsAfterAFailedStep(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
 	r := newRecorder()
@@ -576,6 +586,8 @@ func TestAwaitSignalSkipsAfterAFailedStep(t *testing.T) {
 	require.Error(t, env.GetWorkflowError())
 	require.Less(t, env.Now().Sub(start), time.Hour,
 		"the wait should be skipped once a step has failed")
+	require.ErrorContains(t, env.GetWorkflowError(), "forward failed: a",
+		"and the earlier failure is what gets reported")
 
 	calls, _ := r.snapshot()
 	require.Equal(t, []string{"do:a", "undo:a"}, calls,
@@ -598,7 +610,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		saga.Step(ctx, s, "reserve", a.Do, a.Undo, req{Step: "reserve", Fail: true})
 
-		_, ok := saga.AwaitSignal[string](ctx, s, "approval", time.Hour)
+		_, ok := saga.AwaitSignal[string](ctx, "approval", time.Second)
 		if !ok {
 			if clear {
 				s.Clear() // 「握って自分のエラーを返す」と宣言する

@@ -111,14 +111,24 @@
   </div>
 </div>
 
-<pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
+<p><strong>本体はステップの列のまま。</strong>待つ処理も1行です。</p>
 
-// s.Err() のガードは要らない。reserve が失敗していれば AwaitSignal は
-// 待たずに返り、Run は「最初の失敗」を報告する
-decision, ok := saga.AwaitSignal[Decision](ctx, s, ApprovalSignal, wait)
-if !ok || !decision.Approved {
-    // エラーを返すだけ。ロールバックは Run が引き受ける
-    return order.Receipt{}, temporal.NewApplicationError("...", DeniedType, nil)
+<pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
+saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, order.ChargeReq{Order: in.Order})</code></pre>
+
+<p>判断は利用者が書いた関数の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
+関数の中に閉じ込めるのと、同じ立ち位置です。</p>
+
+<pre><code>func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
+    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+    if !ok {
+        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+    }
+    if !decision.Approved {
+        return Decision{}, temporal.NewApplicationError("rejected by "+decision.By, DeniedType, nil)
+    }
+    return decision, nil
 }</code></pre>
 
 <div class="note-box">
@@ -127,10 +137,9 @@ if !ok || !decision.Approved {
 </div>
 
 <div class="note-box">
-  <strong>最初の失敗が勝ちます。</strong> reserve が失敗すると <code>AwaitSignal</code> は
-  即座に返り、body は「誰も承認しなかった」というエラーを返します。それは本当では
-  ないので、<code>Run</code> は <code>s.err</code>（予約の失敗）を報告します。握って
-  自分のエラーを返したいときだけ、先に <code>s.Clear()</code> を呼んでください。
+  <strong>ステップなので、先が失敗していれば飛ばされます。</strong> ロールバックに
+  向かっている saga が、人の承認を1時間待って止まることはありません。報告されるのも
+  <strong>最初の失敗</strong>で、この待ちが出す「誰も承認しなかった」ではありません。
 </div>
 
 <div class="spec"><b>## 却下されれば予約は取り消される</b>

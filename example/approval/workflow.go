@@ -65,24 +65,39 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (order.Receipt, error) {
 		res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve,
 			order.ReserveReq{Order: in.Order})
 
-		// No guard on s.Err() here. AwaitSignal returns at once if the step
-		// above failed, and Run reports that failure rather than the
-		// "nobody reviewed it" error this body would then produce.
-		decision, ok := saga.AwaitSignal[Decision](ctx, s, ApprovalSignal, wait)
-		if !ok {
-			// Returning an error is the whole rollback trigger. Run releases
-			// the reservation on the way out.
-			return order.Receipt{}, temporal.NewApplicationError(
-				"nobody reviewed the order in time", DeniedType, nil)
-		}
-		if !decision.Approved {
-			return order.Receipt{}, temporal.NewApplicationError(
-				"the order was rejected by "+decision.By, DeniedType, nil)
-		}
+		// The wait is a step like any other. What "nobody answered" means is
+		// decided inside awaitApproval, the same way an activity decides what
+		// its own failure means, so no branch leaks into this body.
+		saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 
 		chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
 			order.ChargeReq{Order: in.Order})
 
 		return order.Receipt{Reservation: res, Charge: chg}, nil
 	})
+}
+
+// ApprovalReq is the input of the approval step.
+type ApprovalReq struct {
+	// Wait bounds how long a reviewer has.
+	Wait time.Duration `json:"wait"`
+}
+
+// awaitApproval waits for a reviewer and turns the answer into a result or an
+// error. It is ordinary workflow code, written by the caller, in the same place
+// an activity would be: the saga only sequences it.
+//
+// Returning an error is the whole rollback trigger. Run releases the
+// reservation on the way out.
+func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
+	decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+	if !ok {
+		return Decision{}, temporal.NewApplicationError(
+			"nobody reviewed the order in time", DeniedType, nil)
+	}
+	if !decision.Approved {
+		return Decision{}, temporal.NewApplicationError(
+			"the order was rejected by "+decision.By, DeniedType, nil)
+	}
+	return decision, nil
 }

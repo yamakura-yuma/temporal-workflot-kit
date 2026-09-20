@@ -16,6 +16,7 @@ import (
 //	                 executed by             key rides in                     budget clamps
 //	activity         ExecuteActivity         ActivityOptions.ActivityID       ScheduleToCloseTimeout
 //	child workflow   ExecuteChildWorkflow    ChildWorkflowOptions.WorkflowID  WorkflowExecutionTimeout
+//	inline           called here and now     nothing is executed remotely     nothing to clamp
 //
 // Local activities are deliberately absent. LocalActivityOptions has no id
 // field, so there is nowhere to put the idempotency key -- and a local
@@ -175,6 +176,60 @@ func ChildStep[In, Out any](
 			}
 
 			return workflow.ExecuteChildWorkflow(workflow.WithChildOptions(c, opts), undoFn, in).Get(c, nil)
+		}
+	}
+
+	return register(ctx, s, name, in, h)
+}
+
+// InlineStep runs workflow code as a step: the function is called here, in this
+// workflow, rather than dispatched anywhere.
+//
+// It is for work that has to happen in the workflow itself and can still fail
+// the saga -- waiting for a signal and deciding what the answer means, waiting
+// on a condition with workflow.Await, choosing between routes. Returning an
+// error from fwd fails the step, which is what every other kind of step does
+// too, so the rollback follows without the body having to arrange it.
+//
+// This is what keeps the body of a saga a list of steps. Without it, a wait has
+// to be written inline and its branches leak into the body:
+//
+//	decision, ok := saga.AwaitSignal[Decision](ctx, "approval", wait)
+//	if !ok { return Receipt{}, temporal.NewApplicationError(...) }
+//	if !decision.Approved { return Receipt{}, temporal.NewApplicationError(...) }
+//
+// With it, that judgement lives in a function of the caller's own, next to the
+// activities, and the body reads:
+//
+//	saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+//
+// Like every step it is skipped once an earlier step has failed, so a saga on
+// its way to being rolled back does not stop to wait for a human.
+//
+// undo may be nil, and usually is: workflow code that only decides something
+// has nothing to undo. When it is not nil it runs on the disconnected
+// compensation context like any other compensation.
+//
+// No idempotency key is minted, because nothing is executed anywhere that could
+// run twice. The step name still has to be unique, since it names the step in
+// the compensation report.
+func InlineStep[In, Out any](
+	ctx workflow.Context,
+	s *Saga,
+	name string,
+	fwd func(workflow.Context, In) (Out, error),
+	undoFn func(workflow.Context, In) error,
+	in In,
+) (Out, error) {
+	h := halves[In, Out]{
+		forward: func(c workflow.Context, _ string, in In) (Out, error) {
+			return fwd(c, in)
+		},
+	}
+
+	if undoFn != nil {
+		h.undo = func(c workflow.Context, _ string, in In) error {
+			return undoFn(c, in)
 		}
 	}
 

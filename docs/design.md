@@ -474,6 +474,7 @@ SDK を確認すると、executor ごとに違うのは3点だけです。
 | アクティビティ | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
 | 子ワークフロー | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
 | 外部への signal | `SignalExternalWorkflow` | **無い** | 無い（コマンドなので即応答） |
+| ワークフロー本体 | **その場で呼ぶ** | 遠隔実行が無いので不要 | 切るものが無い |
 
 ### このライブラリだと
 
@@ -495,6 +496,45 @@ saga.SignalStep(ctx, s, "hold",
 
 混在した saga は1つの逆順で巻き戻ります。補償のレジストリは元から
 `func(workflow.Context) error` を持っているだけで、executor を区別していないからです。
+
+### 待つ処理を本体から追い出す
+
+4つ目の「ワークフロー本体」は、アクティビティだけが持っていた特権を他にも配るための
+ものです。
+
+アクティビティは「失敗が何を意味するか」を関数の中に閉じ込められます。`a.Charge` が
+`error` を返せば、それがステップの失敗になり、本体には何も漏れません。ところが signal を
+待つ処理は本体に書くしかなく、分岐が漏れていました。
+
+```go
+// 漏れている形
+decision, ok := saga.AwaitSignal[Decision](ctx, "approval", wait)
+if !ok {
+    return Receipt{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+}
+if !decision.Approved {
+    return Receipt{}, temporal.NewApplicationError("rejected", DeniedType, nil)
+}
+```
+
+`InlineStep` は、利用者が書いた**ワークフローコードをその場で呼んでステップにします**。
+判断はその関数の中で完結し、本体はステップの列のままになります。
+
+```go
+saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+
+// 利用者が書く。アクティビティを書くのと同じ立ち位置
+func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
+    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+    if !ok {
+        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+    }
+    ...
+}
+```
+
+ステップになったので、**先のステップが失敗していれば飛ばされる**のも他と同じです。
+`AwaitSignal` が `*Saga` を取って自分でスキップ判定をしていた特別扱いは、これで消えました。
 
 ### signal のステップが一番弱い理由
 

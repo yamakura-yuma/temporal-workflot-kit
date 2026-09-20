@@ -24,8 +24,8 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
   契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
   通常パッケージに置く
-- `example/approval/` — ステップの間で signal を待つ例。アクティビティは order の
-  ものを使い、signal の部分だけを見せる
+- `example/approval/` — signal 待ちを `saga.InlineStep` でステップにする例。
+  アクティビティは order のものを使い、待つ部分だけを見せる
 - `example/pipeline/` — 前段の出力が次段の入力になる例
 - `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例
 - `example/childflow/` — ステップが子ワークフローの例（`saga.ChildStep`）

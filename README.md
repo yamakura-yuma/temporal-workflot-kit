@@ -87,7 +87,7 @@ dev server を起動して確かめます。
 | 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
 | 子ワークフローのステップ | アクティビティと同じ形で書け、1つの逆順で巻き戻る |
 | signal のステップ | 他のワークフローに送る。補償は打ち消しの signal |
-| signal を待つ | ステップが失敗していれば待たずに返る |
+| ワークフローコードのステップ | signal 待ちなどを、自分の関数のままステップにする |
 | 逃げ道 | `Add` で任意の取り消しを登録できる |
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
@@ -125,7 +125,7 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 | [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/pipeline/diagram.html) |
 | [`example/state/`](example/state/) | 入力が多い saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ | [図](example/state/diagram.html) |
 | [`example/childflow/`](example/childflow/) | ステップが子ワークフロー。アクティビティと混在しても1つの逆順で巻き戻る | [図](example/childflow/diagram.html) |
-| [`example/approval/`](example/approval/) | ステップの間で signal を待つ。分岐の前に `s.Err()` を見る理由も | [図](example/approval/diagram.html) |
+| [`example/approval/`](example/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/approval/diagram.html) |
 | [`example/external/`](example/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/external/diagram.html) |
 
 形ごとの書き方は [docs/patterns.md](docs/patterns.md) に。
@@ -138,7 +138,8 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 | `saga.Step(ctx, s, name, fwd, undo, in)` | forward のアクティビティを1つ実行し、その補償を登録する |
 | `saga.ChildStep(ctx, s, name, fwd, undo, in)` | 同じことを子ワークフローで行う |
 | `saga.SignalStep(ctx, s, name, fwd, undo, in)` | 同じことを外部ワークフローへの signal で行う |
-| `saga.AwaitSignal[T](ctx, s, name, timeout)` | signal を待つ。ステップが失敗していれば待たない |
+| `saga.InlineStep(ctx, s, name, fwd, undo, in)` | ワークフローコードをその場で呼んでステップにする |
+| `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`InlineStep` の中で使う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
 | `saga.IdempotencyKey(ctx)` | アクティビティ側から冪等キーを読む |
 | `saga.IdempotencyKeyOf(ctx)` | 子ワークフロー側から冪等キーを読む |

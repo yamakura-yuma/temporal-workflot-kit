@@ -67,28 +67,30 @@ func SignalStep[In any](
 // AwaitSignal waits for a signal and decodes its payload. The second result
 // reports whether one arrived before the timeout.
 //
-// This is not a step. Waiting has no side effect, so there is nothing to undo
-// and nothing is registered. It takes the Saga for one reason: **if a step has
-// already failed, it returns immediately instead of waiting.** A saga that is
-// on its way to being rolled back should not sit for an hour waiting for a
-// human to approve it.
+// It is a plain helper, not a step: waiting has no side effect, so there is
+// nothing to register and nothing to undo. Wrap it in an InlineStep, which is
+// what turns "nobody answered" into a failure of the saga and makes the wait
+// skippable once an earlier step has failed:
 //
-// The caller decides what a missing signal means. Returning an error is what
-// triggers the rollback:
-//
-//	decision, ok := saga.AwaitSignal[Decision](ctx, s, "approval", time.Minute)
-//	if !ok || !decision.Approved {
-//	    return Receipt{}, temporal.NewApplicationError("not approved", "Denied", nil)
+//	func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
+//	    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+//	    if !ok {
+//	        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+//	    }
+//	    if !decision.Approved {
+//	        return Decision{}, temporal.NewApplicationError("rejected", DeniedType, nil)
+//	    }
+//	    return decision, nil
 //	}
 //
-// A cancellation while waiting ends the wait with ok false, and the workflow
-// function returns through Run, which compensates on a disconnected context.
-func AwaitSignal[T any](ctx workflow.Context, s *Saga, signalName string, timeout time.Duration) (T, bool) {
+//	saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+//
+// Called directly in the body of a saga it will wait its full timeout even
+// after a step has failed, which is the reason to wrap it.
+//
+// A cancellation while waiting ends the wait with ok false.
+func AwaitSignal[T any](ctx workflow.Context, signalName string, timeout time.Duration) (T, bool) {
 	var payload T
-
-	if s.err != nil {
-		return payload, false
-	}
 
 	arrived := false
 
