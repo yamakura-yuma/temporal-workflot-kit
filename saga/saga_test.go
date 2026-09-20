@@ -581,3 +581,72 @@ func TestAwaitSignalSkipsAfterAFailedStep(t *testing.T) {
 	require.Equal(t, []string{"do:a", "undo:a"}, calls,
 		"and the rollback should still happen")
 }
+
+// --- which error is reported -------------------------------------------------
+
+// maskWorkflow is the shape example/approval has without a guard on s.Err():
+// a step fails, AwaitSignal returns at once, and the body reports the missing
+// signal as the failure.
+func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
+	var a *acts
+	once := &temporal.RetryPolicy{MaximumAttempts: 1}
+
+	return saga.Run(ctx, saga.Options{
+		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
+		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
+		CompensationBudget:  5 * time.Minute,
+	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
+		saga.Step(ctx, s, "reserve", a.Do, a.Undo, req{Step: "reserve", Fail: true})
+
+		_, ok := saga.AwaitSignal[string](ctx, s, "approval", time.Hour)
+		if !ok {
+			if clear {
+				s.Clear() // 「握って自分のエラーを返す」と宣言する
+			}
+			return "", temporal.NewApplicationError("nobody reviewed the order in time", "ApprovalDenied", nil)
+		}
+		return "approved", nil
+	})
+}
+
+// A step's failure outranks an error the body produced afterwards. Without
+// this, a saga whose reservation failed reports "nobody reviewed the order in
+// time", because AwaitSignal returned at once and the body drew the obvious
+// conclusion from it.
+func TestFirstFailureWins(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	r := newRecorder()
+	env.RegisterWorkflow(maskWorkflow)
+	env.RegisterActivity(&acts{r: r})
+
+	env.ExecuteWorkflow(maskWorkflow, false)
+
+	require.True(t, env.IsWorkflowCompleted())
+	err := env.GetWorkflowError()
+	require.Error(t, err)
+
+	require.Contains(t, err.Error(), "forward failed: reserve",
+		"the step that failed is the root cause and has to be what is reported")
+	require.NotContains(t, err.Error(), "nobody reviewed",
+		"the body's conclusion was drawn from a skipped wait, not from the truth")
+
+	calls, _ := r.snapshot()
+	require.Equal(t, []string{"do:reserve", "undo:reserve"}, calls)
+}
+
+// Clear is how a caller says it handled the step failure and means to report
+// its own error instead.
+func TestClearLetsTheBodyReportItsOwnError(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	env.RegisterWorkflow(maskWorkflow)
+	env.RegisterActivity(&acts{r: newRecorder()})
+
+	env.ExecuteWorkflow(maskWorkflow, true)
+
+	require.True(t, env.IsWorkflowCompleted())
+	err := env.GetWorkflowError()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nobody reviewed")
+}

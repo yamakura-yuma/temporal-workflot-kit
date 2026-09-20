@@ -91,6 +91,14 @@ type undo struct {
 // half-filled result and the workflow would be recorded as completed with its
 // side effects half applied.
 //
+// A step's failure also outranks an error the body returns on its own. Once a
+// step has failed, later steps are no-ops and AwaitSignal returns at once, so
+// the body tends to reach a branch that reads a zero value and reports
+// something untrue -- "nobody approved this" when the truth is "the
+// reservation failed". Run reports the step's failure instead. Call s.Clear()
+// before returning your own error if you have handled the step failure and
+// mean to replace it.
+//
 // Run deliberately registers no deferred function. A panic in workflow code
 // fails the workflow task and the whole workflow is replayed, so there is
 // nothing to compensate; and calling a blocking workflow API while a panic
@@ -104,7 +112,15 @@ func Run[T any](ctx workflow.Context, o Options, body func(workflow.Context, *Sa
 	}
 
 	out, err := body(ctx, s)
-	if err == nil {
+
+	// The first failure wins. A step that failed is the root cause; whatever
+	// the body returned afterwards is fallout from it -- often a branch that
+	// read a zero value and drew the wrong conclusion. Reporting the body's
+	// error instead would bury the real one.
+	//
+	// To report an error of your own after handling a step failure, call
+	// s.Clear() first. That is what it is for.
+	if s.err != nil {
 		err = s.err
 	}
 	if err == nil {
@@ -148,10 +164,12 @@ func DefaultKey(ctx workflow.Context, name string) string {
 // steps and let Run deal with the outcome.
 func (s *Saga) Err() error { return s.err }
 
-// Clear forgets the recorded error so that later steps run again. Use it only
-// when the failure was genuinely handled -- it also stops Run from treating the
-// saga as failed, so the compensations registered so far will not run unless a
-// later step fails.
+// Clear forgets the recorded error so that later steps run again, and so that
+// an error the body returns is reported instead of the step's.
+//
+// Use it only when the failure was genuinely handled. It also stops Run from
+// treating the saga as failed, so the compensations registered so far will not
+// run unless a later step fails or the body returns an error.
 func (s *Saga) Clear() { s.err = nil }
 
 // Add registers a compensation that is not a plain activity -- a child

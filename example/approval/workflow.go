@@ -65,14 +65,9 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (order.Receipt, error) {
 		res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve,
 			order.ReserveReq{Order: in.Order})
 
-		// Look at s.Err() before branching. After a failed step the value above
-		// is the zero value, and a branch on it would be a branch on nothing.
-		if err := s.Err(); err != nil {
-			return order.Receipt{}, err
-		}
-
-		// s.Err() が立っていれば待たずに返る。失敗した saga が人の承認を
-		// 待って止まらないように、この判断はライブラリ側にある。
+		// No guard on s.Err() here. AwaitSignal returns at once if the step
+		// above failed, and Run reports that failure rather than the
+		// "nobody reviewed it" error this body would then produce.
 		decision, ok := saga.AwaitSignal[Decision](ctx, s, ApprovalSignal, wait)
 		if !ok {
 			// Returning an error is the whole rollback trigger. Run releases

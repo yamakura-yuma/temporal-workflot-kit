@@ -113,12 +113,8 @@
 
 <pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
 
-if err := s.Err(); err != nil {   // 分岐の前に必ず見る
-    return order.Receipt{}, err   // 失敗していれば res はゼロ値
-}
-
-// s.Err() が立っていれば待たずに返る。失敗した saga が
-// 人の承認を待って止まらないように、この判断はライブラリ側にある
+// s.Err() のガードは要らない。reserve が失敗していれば AwaitSignal は
+// 待たずに返り、Run は「最初の失敗」を報告する
 decision, ok := saga.AwaitSignal[Decision](ctx, s, ApprovalSignal, wait)
 if !ok || !decision.Approved {
     // エラーを返すだけ。ロールバックは Run が引き受ける
@@ -128,6 +124,13 @@ if !ok || !decision.Approved {
 <div class="note-box">
   <strong>待っている間にキャンセルされても補償は走ります。</strong> 切り離した context で
   実行されるからで、ワークフロー側は何も書きません。
+</div>
+
+<div class="note-box">
+  <strong>最初の失敗が勝ちます。</strong> reserve が失敗すると <code>AwaitSignal</code> は
+  即座に返り、body は「誰も承認しなかった」というエラーを返します。それは本当では
+  ないので、<code>Run</code> は <code>s.err</code>（予約の失敗）を報告します。握って
+  自分のエラーを返したいときだけ、先に <code>s.Clear()</code> を呼んでください。
 </div>
 
 <div class="spec"><b>## 却下されれば予約は取り消される</b>

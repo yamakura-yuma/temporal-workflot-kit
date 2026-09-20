@@ -121,18 +121,21 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 ```go
 res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
 
-// 分岐の前に必ず s.Err() を見る。失敗していれば res はゼロ値で、
-// それで分岐すると「何も無いもの」で分岐することになる
-if err := s.Err(); err != nil {
-    return Receipt{}, err
-}
-
 decision, ok := saga.AwaitSignal[Decision](ctx, s, "approval", time.Minute)
 if !ok || !decision.Approved {
     // エラーを返すだけでロールバックが走る
     return Receipt{}, temporal.NewApplicationError("rejected", DeniedType, nil)
 }
 ```
+
+**`s.Err()` のガードは要りません。** `reserve` が失敗していれば `AwaitSignal` は待たずに
+返り、body はここで「誰も承認しなかった」というエラーを返しますが、`Run` は**最初の失敗**
+（予約の失敗）を報告します。握って自分のエラーを返したいときだけ、先に `s.Clear()` を
+呼んでください。
+
+ただし**ライブラリが面倒を見られるのはステップと `AwaitSignal` だけ**です。`s.Err()` が
+立った後も、ログ・`workflow.Sleep`・自前の分岐は普通に実行されます。ゼロ値で分岐する
+コードを書くなら、そこは自分で `s.Err()` を見てください。
 
 待っている間にワークフローがキャンセルされても、補償は走ります。切り離した context で
 実行されるからです。
