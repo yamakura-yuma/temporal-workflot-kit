@@ -8,8 +8,8 @@
 //	        ActivityOptions:    workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second},
 //	        CompensationBudget: 10 * time.Minute,
 //	    }, func(s *saga.Saga) (Receipt, error) {
-//	        id, _ := saga.ActivityStep(ctx, s, "create-order", a.CreateOrder, a.CancelOrder, in)
-//	        pay, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: id})
+//	        id, _ := saga.Step(ctx, s, "create-order", saga.Activity(a.CreateOrder, a.CancelOrder), in)
+//	        pay, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), ChargeReq{Order: id})
 //	        return Receipt{OrderID: id, Paid: pay.ID}, nil
 //	    })
 //	}

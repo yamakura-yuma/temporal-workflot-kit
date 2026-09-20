@@ -95,7 +95,7 @@
 <div class="strip">
   <div class="lane"><span class="tag">saga</span></div>
   <div class="row">
-    <div class="cell f">hold<span class="sub2">SignalStep</span></div>
+    <div class="cell f">hold<span class="sub2">saga.Func</span></div>
     <div class="arr">→</div>
     <div class="cell u">charge ✕<span class="sub2">card declined</span></div>
   </div>
@@ -120,19 +120,26 @@
   <strong>受け手の責任</strong>です。
 </div>
 
-<pre><code>saga.SignalStep(ctx, s, "hold",
-    saga.Signal{WorkflowID: in.Inventory, Name: HoldSignal},     // forward
-    saga.Signal{WorkflowID: in.Inventory, Name: ReleaseSignal},  // 補償
-    HoldReq{Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})</code></pre>
+<pre><code>saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease),
+    HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+
+// 2つとも普通のワークフローコード
+func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
+    err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
+    return struct{}{}, err
+}
+func sendRelease(ctx workflow.Context, req HoldReq) error {
+    return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
+}</code></pre>
 
 <p>補償は forward と同じ payload を受け取るので、<strong>押さえた分だけを正確に戻せます</strong>。</p>
 
 <h2>3つ目の executor</h2>
 <table>
   <tr><th></th><th>実行</th><th>冪等キー</th><th>予算で切る対象</th></tr>
-  <tr><td><code>saga.ActivityStep</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
-  <tr><td><code>saga.ChildWorkflowStep</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
-  <tr><td><code>saga.SignalStep</code></td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
+  <tr><td><code>saga.Step</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
+  <tr><td><code>saga.ChildStep</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
+  <tr><td><code>saga.Func</code>（signal）</td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
 </table>
 
 <div class="spec"><b>## 失敗すると、押さえた在庫が signal で戻される</b>

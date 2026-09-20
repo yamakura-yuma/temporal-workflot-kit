@@ -49,9 +49,9 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
         ActivityOptions:    workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second},
         CompensationBudget: 5 * time.Minute,
     }, func(s *saga.Saga) (Receipt, error) {
-        res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-        chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
-        shp, _ := saga.ActivityStep(ctx, s, "ship", a.Ship, a.CancelShipment, ShipReq{Order: in})
+        res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+        chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
+        shp, _ := saga.Step(ctx, s, "ship", a.Ship, a.CancelShipment, ShipReq{Order: in})
 
         return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
     })
@@ -59,7 +59,7 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 ```
 
 ステップのエラーを `_` で捨てているのは手抜きではありません。最初の失敗以降、後続の
-`ActivityStep` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
+`saga.Activity` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
 外に出ません。
 
 振る舞いは `docs/specs/` に実行できる仕様として置いてあり、`just spec` が実際の Temporal
@@ -85,9 +85,7 @@ dev server を起動して確かめます。
 | 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
 | 失敗の報告 | 補償が失敗したら、型付きのエラーと検索属性で残す。元のエラーは消さない |
 | 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
-| 子ワークフローのステップ | アクティビティと同じ形で書け、1つの逆順で巻き戻る |
-| signal のステップ | 他のワークフローに送る。補償は打ち消しの signal |
-| ワークフローコードのステップ | signal 待ちなどを、自分の関数のままステップにする |
+| ステップの種類を選べる | アクティビティ / 子ワークフロー / 自分の関数。混ざっても1つの逆順で巻き戻る |
 | 逃げ道 | `Add` で任意の取り消しを登録できる |
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
@@ -105,7 +103,7 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 ## 使用方法
 
 デモの後半がそのまま使い方です。`saga.Run` にワークフロー本体を渡し、各ステップを
-`saga.ActivityStep` で書きます。
+`saga.Activity` で書きます。
 
 アクティビティ側には2つだけ約束があります。forward は冪等キーを**原子的に** claim する
 こと、補償は取り消すものが無いときに成功すること。どちらも外すとロールバックが壊れるので、
@@ -135,11 +133,11 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 | | |
 | --- | --- |
 | `saga.Run(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
-| `saga.ActivityStep(ctx, s, name, fwd, undo, in)` | forward のアクティビティを1つ実行し、その補償を登録する |
-| `saga.ChildWorkflowStep(ctx, s, name, fwd, undo, in)` | 同じことを子ワークフローで行う |
-| `saga.SignalStep(ctx, s, name, fwd, undo, in)` | 同じことを外部ワークフローへの signal で行う |
-| `saga.FuncStep(ctx, s, name, fwd, undo, in)` | ワークフローコードをその場で呼んでステップにする |
-| `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`FuncStep` の中で使う |
+| `saga.Step(ctx, s, name, exec, in)` | forward のアクティビティを1つ実行し、その補償を登録する |
+| `saga.Step(ctx, s, name, fwd, undo, in)` | 同じことを子ワークフローで行う |
+
+| `saga.Step(ctx, s, name, fwd, undo, in)` | ワークフローコードをその場で呼んでステップにする |
+| `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`saga.Func` の中で使う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
 | `saga.IdempotencyKey(ctx)` | アクティビティ側から冪等キーを読む |
 | `saga.IdempotencyKeyOf(ctx)` | 子ワークフロー側から冪等キーを読む |

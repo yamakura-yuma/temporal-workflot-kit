@@ -68,16 +68,13 @@ func ChildflowWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve,
-			ReserveReq{Order: in})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve, a.Unreserve), ReserveReq{Order: in})
 
 		// A child workflow step. Same shape as Step; the first argument of the
 		// two functions is a workflow.Context, which is what picks the executor.
-		pack, _ := saga.ChildWorkflowStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow,
-			PackReq{Order: in})
+		pack, _ := saga.Step(ctx, s, "pack", saga.ChildWorkflow(PackWorkflow, UnpackWorkflow), PackReq{Order: in})
 
-		shp, _ := saga.ActivityStep(ctx, s, "ship", a.Ship, a.CancelShipment,
-			ShipReq{Order: in, Pack: pack})
+		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship, a.CancelShipment), ShipReq{Order: in, Pack: pack})
 
 		return Receipt{Reservation: res, Pack: pack, Shipment: shp}, nil
 	})

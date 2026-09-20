@@ -5,10 +5,12 @@
 // the saga tells it to hold, then tells it to release again if a later step
 // fails.
 //
-// This is the third kind of step, and the weakest of the three. Unlike Step and
-// ChildWorkflowStep it carries no idempotency key, because SignalExternalWorkflow has
-// no options struct to put one in. What the saga still guarantees is the
-// pairing: if the saga fails after the hold was sent, the release is sent.
+// Sending a signal is written with saga.Func rather than a constructor of its
+// own: SignalExternalWorkflow has no options struct, so the library has no
+// idempotency key to put on it and no timeout to clamp, which is exactly what a
+// dedicated constructor would have been for. What the saga still guarantees is
+// the pairing -- if the saga fails after the hold was sent, the release is
+// sent.
 package external
 
 import (
@@ -36,9 +38,22 @@ const (
 // HoldReq is the payload of both signals. The compensation is handed the same
 // value the forward step sent, so the release names exactly what was held.
 type HoldReq struct {
-	Order    string `json:"order"`
-	SKU      string `json:"sku"`
-	Quantity int    `json:"quantity"`
+	// Inventory is the workflow id to signal.
+	Inventory string `json:"inventory"`
+	Order     string `json:"order"`
+	SKU       string `json:"sku"`
+	Quantity  int    `json:"quantity"`
+}
+
+// sendHold and sendRelease are the two halves of the hold step. They are
+// ordinary workflow code, which is all a Func step needs.
+func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
+	err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
+	return struct{}{}, err
+}
+
+func sendRelease(ctx workflow.Context, req HoldReq) error {
+	return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
 }
 
 // Order is the saga's input.
@@ -76,15 +91,13 @@ func ExternalWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		// A step whose executor is a signal. Its compensation is the signal
-		// that undoes it, carrying the same payload.
-		saga.SignalStep(ctx, s, "hold",
-			saga.Signal{WorkflowID: in.Inventory, Name: HoldSignal},
-			saga.Signal{WorkflowID: in.Inventory, Name: ReleaseSignal},
-			HoldReq{Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+		// Sending a signal is a Func step: the library has no key to put on it
+		// and no timeout to clamp, so a constructor of its own would be this
+		// with extra vocabulary.
+		saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease),
+			HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
 
-		chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund,
-			ChargeReq{Order: in.ID, Amount: in.Amount, Fail: in.FailAt == "charge"})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), ChargeReq{Order: in.ID, Amount: in.Amount, Fail: in.FailAt == "charge"})
 
 		return Receipt{Charge: chg}, nil
 	})

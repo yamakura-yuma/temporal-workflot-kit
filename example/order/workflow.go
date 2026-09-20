@@ -43,8 +43,8 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 	}
 
 	return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-		chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve, a.Unreserve), ReserveReq{Order: in})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), ChargeReq{Order: in})
 
 		// Somewhere to cancel the workflow from the outside. Sleep returns a
 		// cancellation error, which Run turns into a rollback -- on a
@@ -56,7 +56,7 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 			}
 		}
 
-		shp, _ := saga.ActivityStep(ctx, s, "ship", a.Ship, a.CancelShipment, ShipReq{Order: in})
+		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship, a.CancelShipment), ShipReq{Order: in})
 
 		return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
 	})

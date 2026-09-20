@@ -113,9 +113,9 @@
 
 <p><strong>本体はステップの列のまま。</strong>待つ処理も1行です。</p>
 
-<pre><code>res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
-saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
-chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, order.ChargeReq{Order: in.Order})</code></pre>
+<pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
+saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, order.ChargeReq{Order: in.Order})</code></pre>
 
 <p>判断は利用者が書いた関数の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
 関数の中に閉じ込めるのと、同じ立ち位置です。</p>

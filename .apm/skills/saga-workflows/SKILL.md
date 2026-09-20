@@ -17,7 +17,7 @@ description: >-
 
 | | |
 | --- | --- |
-| `saga/` | ライブラリ本体。`Run` がロールバックを所有し、`ActivityStep` が forward を1つ実行して補償を登録する。 |
+| `saga/` | ライブラリ本体。`Run` がロールバックを所有し、`saga.Activity` が forward を1つ実行して補償を登録する。 |
 | `saga/saga_test.go` | インメモリのテスト環境に対するユニットテスト。 |
 | `docs/` | ドキュメント。`design.md`、`patterns.md`、`activity-contract.md`、`development.md`。 |
 | `docs/specs/` | Gauge の markdown で書かれた実行される仕様。日本語。スイートが起動する実際の dev server に対して実行する。場所は `env/default/default.properties` の `gauge_specs_dir` が決める。 |
@@ -68,23 +68,23 @@ Temporal のインメモリのテスト環境は、**キャンセルされた co
   させる。** body の戻り値は捨てる。さもないとエラーチェックを1つ忘れただけで、
   副作用が半分だけ適用されたワークフローが完了扱いになる。
 - **最初の失敗が、body が後から返すエラーより強い。** ステップが失敗すると以降の
-  `ActivityStep` は no-op、`AwaitSignal` は即座に返るので、body は結果だけを見て本当ではない
+  `saga.Activity` は no-op、`AwaitSignal` は即座に返るので、body は結果だけを見て本当ではない
   結論（「誰も承認しなかった」）を出す。`Run` は `s.err` を優先して根本原因を報告する。
   握って自分のエラーを返すときだけ `s.Clear()`。
 - **補償の失敗を `errors.Join` で束ねない。** Temporal の failure コンバータは単一の
   `Unwrap() error` を辿る型スイッチなので、join したエラーは型名 `joinError`、原因
   チェーン無しで記録され、`NonRetryableErrorTypes` の照合も効かなくなる。
 - **補償の予算は必須。** disconnected context は外から誰もキャンセルできないため。
-- **ステップはアクティビティに限らない。** `ChildWorkflowStep` が子ワークフローを、`SignalStep`
-  が外部ワークフローへの signal を、同じ形で扱う。中核（補償を先に積む、同じ鍵、逆順、
-  予算）は `saga/step.go` の `register` にあり、executor ごとに違うのは3点だけ（実行の
-  呼び出し、鍵を載せる場所、予算で切る対象）。`SignalStep` には鍵が載らないので、受け手
-  側の冪等性は受け手の責任と明記すること。ローカルアクティビティは
-  `LocalActivityOptions` に ID が無いので対象外。
-- **ワークフロー本体で実行するものも `FuncStep` でステップにする。** signal 待ちの
+- **ステップを作る関数は `saga.Step` の1つだけ。** 何で実行するかは渡す値が決める
+  （`saga.Activity` / `saga.ChildWorkflow` / `saga.Func`）。executor ごとに違うのは3点
+  だけ（実行の呼び出し、鍵を載せる場所、予算で切る対象）。
+- **専用の値を足す基準は「鍵を載せるか、予算で切るか」。** どちらもしないものは
+  `saga.Func` に語彙を足しただけなので足さない。外部への signal とローカル
+  アクティビティがこれに当たる。
+- **ワークフロー本体で実行するものも `saga.Func` でステップにする。** signal 待ちの
   ような「ワークフローの中でしか書けず、saga を失敗させうる」処理は、判断ごと利用者の
-  関数に閉じ込めて `FuncStep` に渡す。本体に分岐を漏らさない。`AwaitSignal` はその
-  中で使う素のヘルパーで、`Saga` は取らない。
+  関数に閉じ込める。本体に分岐を漏らさない。`AwaitSignal` はその中で使う素のヘルパーで、
+  `Saga` は取らない。
 
 ## saga のステップを足す
 
@@ -95,7 +95,7 @@ Temporal のインメモリのテスト環境は、**キャンセルされた co
    ヘッダ。キーを読んでから処理する形では足りない。タイムアウトで2つの試行が同時に
    走りうる。
 3. 補償は**取り消すものが無いときに成功する**こと。
-4. `saga.ActivityStep(ctx, s, "<name>", fwd, undo, in)` を、saga 内で一意な名前で呼ぶ。
+4. `saga.Step(ctx, s, "<name>", fwd, undo, in)` を、saga 内で一意な名前で呼ぶ。
    直線的な saga ならステップのエラーは無視してよい。`Run` が扱う。
 5. アクティビティをワーカーに登録する。ワークフローが到達するのに未登録のものは、
    コンパイル時ではなく実行時に失敗する。

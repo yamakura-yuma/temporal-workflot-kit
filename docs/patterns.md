@@ -8,33 +8,31 @@
 
 | 知りたいこと | 答え | 実物 | 図 |
 | --- | --- | --- | --- |
-| ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildWorkflowStep` でステップになる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
+| ステップはアクティビティに限るのか | 限らない。`saga.Step` に渡す値で決まる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
 | アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
 | `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
-| signal を待つには | `saga.FuncStep` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
-| signal を送るステップは書けるか | 書ける。`saga.SignalStep`。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
+| signal を待つには | `saga.Func` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
+| signal を送るステップは書けるか | 書ける。`saga.Func` で。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
 | 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
 ---
 
-## ステップを子ワークフローにする
+## ステップの種類を選ぶ
 
-`ActivityStep` と `ChildWorkflowStep` は形が同じで、違うのは第1引数の型だけです。`context.Context` なら
-アクティビティ、`workflow.Context` なら子ワークフロー。Temporal 自身の区別と同じなので、
-名前を覚えるのではなく型が教えてくれます。
+`saga.Step` は1つだけで、**何で実行するかは渡す値が決めます**。
 
 ```go
 // アクティビティのステップ
-res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
 
 // 子ワークフローのステップ
-pack, _ := saga.ChildWorkflowStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+pack, _ := saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
 
 // 外部ワークフローへの signal のステップ
-saga.SignalStep(ctx, s, "hold", holdSignal, releaseSignal, HoldReq{SKU: in.SKU})
+saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease), HoldReq{SKU: in.SKU})
 
 // 自分のワークフローコードのステップ
-saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 ```
 
 混ぜられます。補償のレジストリは executor を区別しないので、巻き戻しは1つの逆順で回ります。
@@ -63,8 +61,8 @@ func UnpackWorkflow(ctx workflow.Context, req PackReq) error {
 渡せます。前段の出力を次段のリクエストに入れるだけ。
 
 ```go
-res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund,
+res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
     ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
 ```
 
@@ -106,9 +104,9 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 }
 ```
 
-`ActivityStep` と `ChildWorkflowStep` は `ctx` と `s` を引数で取るので、メソッドでも関数でも好きに割れます。
+`saga.Activity` と `saga.ChildWorkflow` は `ctx` と `s` を引数で取るので、メソッドでも関数でも好きに割れます。
 
-**state 構造体そのものを `ActivityStep` に渡すことはできません。** `ActivityStep` の入力はアクティビティの
+**state 構造体そのものを `saga.Activity` に渡すことはできません。** `saga.Activity` の入力はアクティビティの
 引数なので、シリアライズ可能である必要があります。メソッドの中で state からリクエストを
 組んでください。
 
@@ -118,11 +116,11 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 
 ## signal を待つ
 
-待つ処理も**ステップにします**。`saga.FuncStep` が、利用者の書いたワークフローコードを
+待つ処理も**ステップにします**。`saga.Func` が、利用者の書いたワークフローコードを
 その場で呼んでステップに変えます。
 
 ```go
-saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 ```
 
 判断は `awaitApproval` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
@@ -144,15 +142,15 @@ func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
 ステップなので、**先のステップが失敗していれば飛ばされます**。ロールバックに向かっている
 saga が人の承認を1時間待って止まることはありません。
 
-`FuncStep` は signal 専用ではありません。ワークフローの中で実行する必要があって、かつ
+`saga.Func` は signal 専用ではありません。ワークフローの中で実行する必要があって、かつ
 saga を失敗させうるもの全般に使えます。`workflow.Await` で条件を待つ、経路を選ぶ、など。
 
 本体はステップの列のままになります。
 
 ```go
-res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
-chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
+res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
 ```
 
 **`s.Err()` のガードは要りません。** ステップが失敗していれば以降のステップは飛ばされ、
@@ -168,18 +166,27 @@ chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Orde
 
 ## signal を送るステップ
 
-他のワークフローが持っている状態を動かすステップは `saga.SignalStep` で書けます。補償は
+他のワークフローが持っている状態を動かすステップは `saga.Func` で書けます。補償は
 打ち消しの signal です。
 
 ```go
-saga.SignalStep(ctx, s, "hold",
-    saga.Signal{WorkflowID: in.Inventory, Name: HoldSignal},     // forward
-    saga.Signal{WorkflowID: in.Inventory, Name: ReleaseSignal},  // 補償
-    HoldReq{Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease),
+    HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+
+// 2つとも普通のワークフローコード。Func に渡せるのはこれで足りる
+func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
+    err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
+    return struct{}{}, err
+}
+
+func sendRelease(ctx workflow.Context, req HoldReq) error {
+    return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
+}
 ```
 
 補償は forward と同じ payload を受け取るので、押さえた分だけを正確に戻せます。
 
-**3つの executor の中では一番弱い形です。** `SignalExternalWorkflow` には options 構造体が
-無く、冪等キーを載せる場所がありません。saga が保証するのは対になっていることだけで、
-同じ signal を2回受けても壊れないようにするのは受け手の責任です。
+**専用の値は用意していません。** `SignalExternalWorkflow` には options 構造体が無いので、
+ライブラリが載せられる冪等キーも、切れる予算もありません。専用にしても `saga.Func` に
+語彙を足すだけになります。saga が保証するのは対になっていることだけで、同じ signal を
+2回受けても壊れないようにするのは受け手の責任です。

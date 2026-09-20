@@ -87,7 +87,7 @@ type undo struct {
 // body returning a nil error is not enough to be treated as success: if any
 // step inside it failed, Run compensates and returns that error, discarding
 // body's return value. That is deliberate. With the sticky-error behaviour of
-// ActivityStep, a caller who forgets to check an error would otherwise return a
+// Step, a caller who forgets to check an error would otherwise return a
 // half-filled result and the workflow would be recorded as completed with its
 // side effects half applied.
 //
@@ -262,7 +262,7 @@ func withBudget(ctx workflow.Context, remaining time.Duration) workflow.Context 
 // whether there is a budget at all. It returns false outside the compensation
 // phase.
 //
-// ActivityStep and ChildWorkflowStep use it to clamp their own timeouts. Call it from a
+// Activity and ChildWorkflow steps use it to clamp their own timeouts. Call it from a
 // compensation registered with Add, which the library cannot clamp for you.
 func RemainingBudget(ctx workflow.Context) (time.Duration, bool) {
 	d, ok := ctx.Value(budgetKey{}).(time.Duration)

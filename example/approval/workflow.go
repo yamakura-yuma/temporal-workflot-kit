@@ -62,16 +62,14 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (order.Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (order.Receipt, error) {
-		res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve,
-			order.ReserveReq{Order: in.Order})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve, a.Unreserve), order.ReserveReq{Order: in.Order})
 
 		// The wait is a step like any other. What "nobody answered" means is
 		// decided inside awaitApproval, the same way an activity decides what
 		// its own failure means, so no branch leaks into this body.
-		saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+		saga.Step(ctx, s, "approval", saga.Func(awaitApproval, nil), ApprovalReq{Wait: wait})
 
-		chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund,
-			order.ChargeReq{Order: in.Order})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), order.ChargeReq{Order: in.Order})
 
 		return order.Receipt{Reservation: res, Charge: chg}, nil
 	})

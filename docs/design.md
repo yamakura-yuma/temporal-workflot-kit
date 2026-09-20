@@ -132,10 +132,10 @@ t=10.5  ゲートウェイから 200 が返り、課金が確定する
 
 ### このライブラリだと
 
-`saga.ActivityStep` は、forward を投げる**前**に取り消しを積みます。
+`saga.Activity` は、forward を投げる**前**に取り消しを積みます。
 
 ```go
-chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, req)
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, req)
 //                                    ~~~~~~~~  ~~~~~~~~
 //                                    これを投げる前に、これを積む
 ```
@@ -198,7 +198,7 @@ chg.ID が手に入る時点   →  もう遅い（タイムアウトしたら�
 渡します。番号は forward の結果に依存しないので、実行前に決められます。
 
 ```go
-// saga.ActivityStep の中でやっていること
+// saga.Step の中でやっていること
 key := ctx の RunID + "/" + ステップ名     // 例: 01a0be.../charge
 
 opts.ActivityID = key              // forward に渡す
@@ -298,7 +298,7 @@ saga が続いているだけなので取り消しません。）
 
 もう一段あります。**ステップの失敗は、body が後から返すエラーより強い**、という規則です。
 
-ステップが失敗すると、以降の `ActivityStep` は何もせず `AwaitSignal` は即座に返ります。すると
+ステップが失敗すると、以降の `saga.Activity` は何もせず `AwaitSignal` は即座に返ります。すると
 body は「値が空」「signal が来ない」という**結果だけを見て、本当ではない結論**を出します。
 
 ```
@@ -330,7 +330,7 @@ if s.err != nil {
 
 ### やりたいこと
 
-`saga.ActivityStep(..., a.Charge, a.Refund, ...)` の2つを、うっかり逆に書いた。気づきたい。
+`saga.Step(..., a.Charge, a.Refund, ...)` の2つを、うっかり逆に書いた。気づきたい。
 
 ### 素直に書くと
 
@@ -354,24 +354,26 @@ func Step(s *Saga, name string, fwd, undo any, args ...any)
 型付きの関数で受けます。
 
 ```go
-func ActivityStep[In, Out any](ctx workflow.Context, s *Saga, name string,
+func Step[In, Out any](ctx workflow.Context, s *Saga, name string,
+    e Exec[In, Out], in In) (Out, error)
+
+func Activity[In, Out any](
     fwd  func(context.Context, In) (Out, error),
-    undo func(context.Context, In) error,
-    in In) (Out, error)
+    undo func(context.Context, In) error) Exec[In, Out]
 ```
 
 `fwd` は値とエラーを返し、`undo` はエラーだけを返します。この非対称が効きます。逆に書くと
 戻り値の形が合わず、**コンパイルエラー**になります。
 
 ```go
-saga.ActivityStep(ctx, s, "charge", a.Refund, a.Charge, req)
+saga.Step(ctx, s, "charge", a.Refund, a.Charge, req)
 //                          ~~~~~~~~ わざと逆に書いてみる
 ```
 
 実際にコンパイラが出すのはこれです。
 
 ```
-vet: in call to saga.ActivityStep, type func(ctx context.Context, req ChargeReq) error
+vet: in call to saga.Step, type func(ctx context.Context, req ChargeReq) error
 of a.Refund does not match inferred type func(context.Context, ChargeReq) (Out, error)
 for func(context.Context, In) (Out, error)
 ```
@@ -450,12 +452,12 @@ if errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType {
 
 ### 素直に書くと
 
-`ActivityStep` が受け取るのは `func(context.Context, In) (Out, error)` です。これは
+`saga.Activity` が受け取るのは `func(context.Context, In) (Out, error)` です。これは
 **アクティビティ関数のシグネチャそのもの**なので、子ワークフローは渡せません。
 
 ```go
 // 子ワークフローは第1引数が workflow.Context なので、Step には入らない
-saga.ActivityStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, req)   // コンパイルエラー
+saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, req)   // コンパイルエラー
 ```
 
 逃げ道は `s.Add` で手書きすることですが、そうすると冪等キーも予算の切り詰めも自分で
@@ -471,29 +473,26 @@ SDK を確認すると、executor ごとに違うのは3点だけです。
 
 | 名前 | 実行 | 鍵を載せる場所 | 予算で切る対象 |
 | --- | --- | --- | --- |
-| `ActivityStep` | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
-| `ChildWorkflowStep` | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
-| `SignalStep` | `SignalExternalWorkflow` | **無い** | 無い（コマンドなので即応答） |
-| `FuncStep` | **その場で呼ぶ** | 遠隔実行が無いので不要 | 切るものが無い |
+| `saga.Activity` | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
+| `saga.ChildWorkflow` | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
+| `saga.Func` | `SignalExternalWorkflow` | **無い** | 無い（コマンドなので即応答） |
+| `saga.Func` | **その場で呼ぶ** | 遠隔実行が無いので不要 | 切るものが無い |
 
 名前は「何を実行するか + Step」で揃えています。`Step` という名前を1つだけ特別扱いすると、
 それがアクティビティ専用であることが名前から読めません。
 
 ### このライブラリだと
 
-中核を `register` に切り出し、上の3点だけを差し替えた `ChildWorkflowStep` と `SignalStep` を
+中核を `register` に切り出し、上の3点だけを差し替えた `saga.ChildWorkflow` と `saga.Func` を
 用意しています。
 
 ```go
-pack, _ := saga.ChildWorkflowStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+pack, _ := saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
 
-saga.SignalStep(ctx, s, "hold",
-    saga.Signal{WorkflowID: inventory, Name: "hold"},
-    saga.Signal{WorkflowID: inventory, Name: "release"},
-    HoldReq{SKU: in.SKU})
+saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease), HoldReq{SKU: in.SKU})
 ```
 
-形は `ActivityStep` と同じ。`fwd` が値とエラーを返し `undo` がエラーだけを返す非対称も同じなので、
+形は `saga.Activity` と同じ。`fwd` が値とエラーを返し `undo` がエラーだけを返す非対称も同じなので、
 取り違えはやはりコンパイルエラーになります。**第1引数の型が executor を選ぶ**ので、
 どちらを呼ぶかは型が教えてくれます。
 
@@ -520,11 +519,11 @@ if !decision.Approved {
 }
 ```
 
-`FuncStep` は、利用者が書いた**ワークフローコードをその場で呼んでステップにします**。
+`saga.Func` は、利用者が書いた**ワークフローコードをその場で呼んでステップにします**。
 判断はその関数の中で完結し、本体はステップの列のままになります。
 
 ```go
-saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 
 // 利用者が書く。アクティビティを書くのと同じ立ち位置
 func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
@@ -541,21 +540,21 @@ func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
 
 ### どれが専用の関数に値するか
 
-4つのうち `FuncStep` は他の3つを**全部書けてしまいます**。渡す関数の中で
+4つのうち `saga.Func` は他の3つを**全部書けてしまいます**。渡す関数の中で
 `ExecuteActivity` を呼べばアクティビティのステップになるし、`SignalExternalWorkflow` を
 呼べば signal のステップになる。
 
 では何が専用の関数を正当化するのか。**冪等キーを載せるか、予算で切るか**です。
 
-| | 鍵 | 予算 | 専用の関数に値するか |
+| | 鍵 | 予算 | 専用の値に値するか |
 | --- | --- | --- | --- |
-| `ActivityStep` | ✓ | ✓ | する |
-| `ChildWorkflowStep` | ✓ | ✓ | する |
-| `SignalStep` | ✗ | ✗ | **していない**。`FuncStep` の糖衣 |
-| `FuncStep` | — | — | 他が扱えないものの受け皿 |
+| `saga.Activity` | ✓ | ✓ | する |
+| `saga.ChildWorkflow` | ✓ | ✓ | する |
+| 外部への signal | ✗ | ✗ | **しない**。`saga.Func` で書く |
+| `saga.Func` | — | — | 他が扱えないものの受け皿 |
 
-`SignalStep` が残っているのは、宛先を `Signal{WorkflowID, Name}` として宣言的に書けて、
-forward と補償の対が目に見えるからです。それだけの価値しかありません。
+signal を送るステップは、以前は専用の値にしていました。この基準に照らすと
+`saga.Func` に語彙を足しただけだったので、落としました。
 
 ### Temporal の他のオブジェクトはどうか
 
@@ -564,21 +563,21 @@ forward と補償の対が目に見えるからです。それだけの価値し
 | | 鍵 | 予算 | 判断 |
 | --- | --- | --- | --- |
 | Nexus operation（`NexusClient.ExecuteOperation`） | ✗ | ✓ `ScheduleToCloseTimeout` | **一番近い候補**。予算は切れるが鍵が載らない |
-| `RequestCancelExternalWorkflow` | ✗ | ✗ | `FuncStep` で足りる。そもそも取り消しを取り消せない |
-| `UpsertTypedSearchAttributes` / `UpsertMemo` | 不要 | 無い | `FuncStep` で足りる。自分の可視化情報なので遠隔実行が無い |
+| `RequestCancelExternalWorkflow` | ✗ | ✗ | `saga.Func` で足りる。そもそも取り消しを取り消せない |
+| `UpsertTypedSearchAttributes` / `UpsertMemo` | 不要 | 無い | `saga.Func` で足りる。自分の可視化情報なので遠隔実行が無い |
 | `SideEffect` / `MutableSideEffect` | — | — | 値を作るだけで外に副作用が無い |
 | ローカルアクティビティ | ✗ | ✓ | 鍵が載らない。リトライがサーバに残らないので置き場所としても不適 |
 
 **Nexus だけは将来 `NexusStep` に値するかもしれません。** 他サービスへの呼び出しで、
 タイムアウトを持ち、補償が要る副作用を起こしうるからです。ただし
-`NexusOperationOptions` に ID フィールドが無いので、今の基準では `SignalStep` と同じ段に
+`NexusOperationOptions` に ID フィールドが無いので、今の基準では `saga.Func` と同じ段に
 なります。必要になってから足します。
 
 ### signal のステップが一番弱い理由
 
-`SignalStep` は成立しますが、`SignalExternalWorkflow` には options 構造体が無いので
+`saga.Func` は成立しますが、`SignalExternalWorkflow` には options 構造体が無いので
 **冪等キーを載せる場所がありません**。対になっていることは保証できても、受け手が同じ
-signal を2回受けたときに壊れないようにするのは受け手の責任です。形が `ActivityStep` と違うのも
+signal を2回受けたときに壊れないようにするのは受け手の責任です。形が `saga.Activity` と違うのも
 そのためで、signal は関数呼び出しではないので `fwd`/`undo` に関数ではなく宛先
 （`Signal`）を取ります。
 
@@ -601,6 +600,6 @@ signal を2回受けたときに壊れないようにするのは受け手の責
 | エラーを溜めて後で見る | 見忘れると壊れた成功になる | `Run` が本体の戻り値を信用しない |
 | `any` で関数を受ける | 取り違えが取り消し中に発覚 | 型で受けてコンパイルエラーに |
 | `errors.Join` で束ねる | 履歴から原因が消える | 1本鎖の `ApplicationError` |
-| ステップをアクティビティに限る | 子ワークフローや外部への signal が巻き戻しに乗らない | `ChildWorkflowStep` と `SignalStep` |
+| ステップをアクティビティに限る | 子ワークフローや外部への signal が巻き戻しに乗らない | `saga.ChildWorkflow` と `saga.Func` |
 
 塞げていない穴は [activity-contract.md](activity-contract.md) に書いてあります。

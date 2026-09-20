@@ -112,13 +112,13 @@
 <table>
   <tr><th></th><th>実行</th><th>冪等キーを載せる場所</th><th>予算で切る対象</th></tr>
   <tr>
-    <td><strong>アクティビティ</strong><br><code>saga.ActivityStep</code></td>
+    <td><strong>アクティビティ</strong><br><code>saga.Step</code></td>
     <td><code>ExecuteActivity</code></td>
     <td><code>ActivityOptions.ActivityID</code></td>
     <td><code>ScheduleToCloseTimeout</code></td>
   </tr>
   <tr>
-    <td><strong>子ワークフロー</strong><br><code>saga.ChildWorkflowStep</code></td>
+    <td><strong>子ワークフロー</strong><br><code>saga.ChildStep</code></td>
     <td><code>ExecuteChildWorkflow</code></td>
     <td><code>ChildWorkflowOptions.WorkflowID</code></td>
     <td><code>WorkflowExecutionTimeout</code></td>
@@ -137,8 +137,8 @@
   同じなので、名前ではなく型が教えてくれます。
 </p>
 
-<pre><code>res,  _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-pack, _ := saga.ChildWorkflowStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+<pre><code>res,  _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
 
 // 子の側は自分の鍵を読む。":undo" は剥がされているので forward と同じ値
 key, _ := saga.IdempotencyKeyOf(ctx)</code></pre>
