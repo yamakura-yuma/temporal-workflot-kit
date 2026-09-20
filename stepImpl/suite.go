@@ -22,17 +22,26 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/yamakura-yuma/temporal-saga/example/approval"
+	"github.com/yamakura-yuma/temporal-saga/example/childflow"
 	"github.com/yamakura-yuma/temporal-saga/example/order"
+	"github.com/yamakura-yuma/temporal-saga/example/pipeline"
+	"github.com/yamakura-yuma/temporal-saga/example/state"
 )
 
 // Suite-wide, because they are started once per run. Per-scenario state goes in
 // Gauge's scenario store instead, so that it cannot leak between scenarios.
 var (
-	devServer      *testsuite.DevServer
-	temporalClient client.Client
-	temporalWorker worker.Worker
-	approvalWorker worker.Worker
-	ledger         *order.Ledger
+	devServer       *testsuite.DevServer
+	temporalClient  client.Client
+	temporalWorker  worker.Worker
+	approvalWorker  worker.Worker
+	pipelineWorker  worker.Worker
+	childflowWorker worker.Worker
+	stateWorker     worker.Worker
+	ledger          *order.Ledger
+	pipelineLedger  *pipeline.Ledger
+	childflowLedger *childflow.Ledger
+	stateLedger     *state.Ledger
 )
 
 var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
@@ -78,9 +87,46 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	if err := approvalWorker.Start(); err != nil {
 		fail("start the approval worker: %v", err)
 	}
+
+	pipelineLedger = pipeline.NewLedger()
+	pipelineWorker = worker.New(temporalClient, pipeline.TaskQueue, worker.Options{})
+	pipelineWorker.RegisterWorkflow(pipeline.PipelineWorkflow)
+	pipelineWorker.RegisterActivity(pipeline.NewActivities(pipelineLedger))
+	if err := pipelineWorker.Start(); err != nil {
+		fail("start the pipeline worker: %v", err)
+	}
+
+	// The packing children inherit this task queue, so one worker covers the
+	// parent, both children and the activities.
+	childflowLedger = childflow.NewLedger()
+	childflowWorker = worker.New(temporalClient, childflow.TaskQueue, worker.Options{})
+	childflowWorker.RegisterWorkflow(childflow.ChildflowWorkflow)
+	childflowWorker.RegisterWorkflow(childflow.PackWorkflow)
+	childflowWorker.RegisterWorkflow(childflow.UnpackWorkflow)
+	childflowWorker.RegisterActivity(childflow.NewActivities(childflowLedger))
+	if err := childflowWorker.Start(); err != nil {
+		fail("start the childflow worker: %v", err)
+	}
+
+	stateLedger = state.NewLedger()
+	stateWorker = worker.New(temporalClient, state.TaskQueue, worker.Options{})
+	stateWorker.RegisterWorkflow(state.StateWorkflow)
+	stateWorker.RegisterActivity(state.NewActivities(stateLedger))
+	if err := stateWorker.Start(); err != nil {
+		fail("start the state worker: %v", err)
+	}
 }, []string{}, testsuit.AND)
 
 var _ = gauge.AfterSuite(func(*m.ExecutionInfo) {
+	if stateWorker != nil {
+		stateWorker.Stop()
+	}
+	if childflowWorker != nil {
+		childflowWorker.Stop()
+	}
+	if pipelineWorker != nil {
+		pipelineWorker.Stop()
+	}
 	if approvalWorker != nil {
 		approvalWorker.Stop()
 	}

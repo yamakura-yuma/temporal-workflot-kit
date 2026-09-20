@@ -112,7 +112,7 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
 		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
 		CompensationBudget:  budget,
-	}, func(s *saga.Saga) ([]string, error) {
+	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		var out []string
 		for i, spec := range p.Steps {
 			undo := a.Undo
@@ -428,7 +428,7 @@ func TestBudgetIsRequired(t *testing.T) {
 	noBudget := func(ctx workflow.Context) error {
 		_, err := saga.Run(ctx, saga.Options{
 			ActivityOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute},
-		}, func(*saga.Saga) (int, error) { return 0, nil })
+		}, func(workflow.Context, *saga.Saga) (int, error) { return 0, nil })
 		return err
 	}
 	env.RegisterWorkflow(noBudget)
@@ -444,4 +444,79 @@ func TestIdempotencyKeyOutsideAnActivity(t *testing.T) {
 	key, ok := saga.IdempotencyKey(context.Background())
 	require.False(t, ok)
 	require.Empty(t, key)
+}
+
+// --- child workflow steps ----------------------------------------------------
+
+// childDo and childUndo are the two halves of a child-workflow step. They call
+// the same activities the activity steps use, so the recorder sees one ordered
+// list across both kinds of step.
+func childDo(ctx workflow.Context, in req) (string, error) {
+	var a *acts
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: time.Minute,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
+
+	var out string
+	err := workflow.ExecuteActivity(ctx, a.Do, in).Get(ctx, &out)
+	return out, err
+}
+
+func childUndo(ctx workflow.Context, in req) error {
+	var a *acts
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: time.Minute,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
+	return workflow.ExecuteActivity(ctx, a.Undo, in).Get(ctx, nil)
+}
+
+// mixedWorkflow has an activity step, then a child workflow step, then an
+// activity step that fails.
+func mixedWorkflow(ctx workflow.Context) ([]string, error) {
+	var a *acts
+	once := &temporal.RetryPolicy{MaximumAttempts: 1}
+
+	return saga.Run(ctx, saga.Options{
+		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
+		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
+		CompensationBudget:  5 * time.Minute,
+	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
+		saga.Step(ctx, s, "a", a.Do, a.Undo, req{Step: "a"})
+		saga.ChildStep(ctx, s, "b", childDo, childUndo, req{Step: "b"})
+		saga.Step(ctx, s, "c", a.Do, a.Undo, req{Step: "c", Fail: true})
+		return nil, s.Err()
+	})
+}
+
+// A step can be a child workflow as well as an activity, and the rollback runs
+// both kinds in one reverse order. Nothing about the registry is per-executor:
+// it holds compensations as plain functions.
+func TestChildStepCompensatesInOneOrder(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+
+	r := newRecorder()
+	env.RegisterWorkflow(mixedWorkflow)
+	env.RegisterWorkflow(childDo)
+	env.RegisterWorkflow(childUndo)
+	env.RegisterActivity(&acts{r: r})
+
+	env.ExecuteWorkflow(mixedWorkflow)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError())
+
+	calls, keys := r.snapshot()
+	require.Equal(t,
+		[]string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"},
+		calls,
+		"the child workflow step must take its place in the one reverse order")
+
+	// The child's halves run activities of their own, so the key those
+	// activities see is the child's, not the saga step's. What the saga
+	// guarantees is that the two children are named for the same step.
+	require.NotEmpty(t, keys["do:b"])
+	require.NotEmpty(t, keys["undo:b"])
 }

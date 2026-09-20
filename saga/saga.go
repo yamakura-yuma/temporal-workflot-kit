@@ -95,7 +95,7 @@ type undo struct {
 // fails the workflow task and the whole workflow is replayed, so there is
 // nothing to compensate; and calling a blocking workflow API while a panic
 // unwinds deadlocks the coroutine.
-func Run[T any](ctx workflow.Context, o Options, body func(*Saga) (T, error)) (T, error) {
+func Run[T any](ctx workflow.Context, o Options, body func(workflow.Context, *Saga) (T, error)) (T, error) {
 	var zero T
 
 	s, err := newSaga(o)
@@ -103,7 +103,7 @@ func Run[T any](ctx workflow.Context, o Options, body func(*Saga) (T, error)) (T
 		return zero, err
 	}
 
-	out, err := body(s)
+	out, err := body(ctx, s)
 	if err == nil {
 		err = s.err
 	}
@@ -240,7 +240,13 @@ func withBudget(ctx workflow.Context, remaining time.Duration) workflow.Context 
 	return workflow.WithValue(ctx, budgetKey{}, remaining)
 }
 
-func budgetOf(ctx workflow.Context) (time.Duration, bool) {
+// RemainingBudget reports how much of the compensation budget is left, and
+// whether there is a budget at all. It returns false outside the compensation
+// phase.
+//
+// Step and ChildStep use it to clamp their own timeouts. Call it from a
+// compensation registered with Add, which the library cannot clamp for you.
+func RemainingBudget(ctx workflow.Context) (time.Duration, bool) {
 	d, ok := ctx.Value(budgetKey{}).(time.Duration)
 	return d, ok
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/workflow"
 )
 
 // IdempotencyKey returns the saga step's idempotency key, and reports whether
@@ -25,6 +26,19 @@ func IdempotencyKey(ctx context.Context) (key string, ok bool) {
 	}()
 
 	id := activity.GetInfo(ctx).ActivityID
+	if id == "" {
+		return "", false
+	}
+	return strings.TrimSuffix(id, undoSuffix), true
+}
+
+// IdempotencyKeyOf is IdempotencyKey for a child workflow started by ChildStep.
+// The key rides in the child's WorkflowID.
+//
+// A forward child and the child that compensates it see the same key, which is
+// how the compensation finds out whether the work happened.
+func IdempotencyKeyOf(ctx workflow.Context) (string, bool) {
+	id := workflow.GetInfo(ctx).WorkflowExecution.ID
 	if id == "" {
 		return "", false
 	}

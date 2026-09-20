@@ -180,7 +180,8 @@ var _ = gauge.Step("注文は <steps> を保持したままである", func(step
 var _ = gauge.Step("注文は <steps> を保持していない", func(steps string) {
 	run := currentRun()
 	for _, step := range split(steps) {
-		if ledger.Held(run.GetRunID(), step) {
+		if ledger.Held(run.GetRunID(), step) || pipelineLedger.Held(run.GetRunID(), step) ||
+			childflowLedger.Held(run.GetRunID(), step) || stateLedger.Held(run.GetRunID(), step) {
 			fail("%q is still held, so it was not rolled back", step)
 		}
 	}

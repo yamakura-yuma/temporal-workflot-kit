@@ -61,8 +61,7 @@ stepImpl/steps.go
 | `saga/` | ライブラリ本体とユニットテスト |
 | `docs/specs/` | 実行される仕様 |
 | `stepImpl/` | そのステップの実装と、サーバとワーカーを起動するスイートフック |
-| `example/order/` | 仕様が動かす saga。アクティビティ側の契約の実装例でもある |
-| `example/approval/` | ステップの間で signal を待つ例。アクティビティは order のものを使う |
+| `example/*/` | 仕様が動かす saga。1テーマ1 example（order / pipeline / state / childflow / approval） |
 | `manifest.json`、`env/` | Gauge の設定。プロジェクトルートに置く必要がある |
 
 `example/order/` が通常パッケージなのは、Gauge がテストバイナリではなくモジュールを

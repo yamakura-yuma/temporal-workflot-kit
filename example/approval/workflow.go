@@ -61,7 +61,7 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (order.Receipt, error) {
 			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 		},
 		CompensationBudget: time.Minute,
-	}, func(s *saga.Saga) (order.Receipt, error) {
+	}, func(ctx workflow.Context, s *saga.Saga) (order.Receipt, error) {
 		res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve,
 			order.ReserveReq{Order: in.Order})
 

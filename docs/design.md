@@ -411,6 +411,63 @@ if errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType {
 
 ---
 
+## 7. ステップがアクティビティに縛られる
+
+### やりたいこと
+
+梱包の工程を子ワークフローで書きたい。履歴が長くなるので独立させたい。でも saga の
+ステップとして、他と同じように巻き戻したい。
+
+### 素直に書くと
+
+`Step` が受け取るのは `func(context.Context, In) (Out, error)` です。これは
+**アクティビティ関数のシグネチャそのもの**なので、子ワークフローは渡せません。
+
+```go
+// 子ワークフローは第1引数が workflow.Context なので、Step には入らない
+saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, req)   // コンパイルエラー
+```
+
+逃げ道は `s.Add` で手書きすることですが、そうすると冪等キーも予算の切り詰めも自分で
+やることになります。
+
+### そこで何が起きるか
+
+「forward と補償を対で登録する」という中核は、**executor に依存していません**。
+補償を先に積む、同じ鍵を両側に渡す、逆順で回す、予算で切る。どれもアクティビティである
+必要はない。縛っていたのは引数の型だけでした。
+
+SDK を確認すると、executor ごとに違うのは3点だけです。
+
+| | 実行 | 鍵を載せる場所 | 予算で切る対象 |
+| --- | --- | --- | --- |
+| アクティビティ | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
+| 子ワークフロー | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
+
+### このライブラリだと
+
+中核を `register` に切り出し、上の3点だけを差し替えた `ChildStep` を用意しています。
+
+```go
+pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+```
+
+形は `Step` と同じ。`fwd` が値とエラーを返し `undo` がエラーだけを返す非対称も同じなので、
+取り違えはやはりコンパイルエラーになります。**第1引数の型が executor を選ぶ**ので、
+どちらを呼ぶかは型が教えてくれます。
+
+混在した saga は1つの逆順で巻き戻ります。補償のレジストリは元から
+`func(workflow.Context) error` を持っているだけで、executor を区別していないからです。
+
+### ローカルアクティビティを外した理由
+
+`LocalActivityOptions` には ID フィールドがありません。冪等キーを載せる場所が無いので、
+このライブラリの契約を満たせない。加えてローカルアクティビティはリトライがワークフロー
+タスク内で完結してサーバに残らないので、取り消しが必要な副作用を置く場所としても適して
+いません。
+
+---
+
 ## まとめ
 
 | 素直に書くと | 起きること | このライブラリ |
@@ -421,5 +478,6 @@ if errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType {
 | エラーを溜めて後で見る | 見忘れると壊れた成功になる | `Run` が本体の戻り値を信用しない |
 | `any` で関数を受ける | 取り違えが取り消し中に発覚 | 型で受けてコンパイルエラーに |
 | `errors.Join` で束ねる | 履歴から原因が消える | 1本鎖の `ApplicationError` |
+| ステップをアクティビティに限る | 子ワークフローが巻き戻しに乗らない | `ChildStep` で同じ形のまま扱う |
 
 塞げていない穴は [activity-contract.md](activity-contract.md) に書いてあります。

@@ -42,7 +42,7 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		opts.CompensationFailedAttribute = &CompensationFailedAttribute
 	}
 
-	return saga.Run(ctx, opts, func(s *saga.Saga) (Receipt, error) {
+	return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 		res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
 		chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
 

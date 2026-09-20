@@ -85,7 +85,8 @@ dev server を起動して確かめます。
 | 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
 | 失敗の報告 | 補償が失敗したら、型付きのエラーと検索属性で残す。元のエラーは消さない |
 | 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
-| 逃げ道 | 子ワークフローなど、アクティビティ以外も補償に登録できる |
+| 子ワークフローのステップ | アクティビティと同じ形で書け、1つの逆順で巻き戻る |
+| 逃げ道 | `Add` で任意の取り消しを登録できる（外部ワークフローへの signal など） |
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
 コード付きで書いてあります。
@@ -111,21 +112,28 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 
 ### 他のパターン
 
+1テーマにつき1つ。どれも `docs/specs/` の仕様から実際に動かしています。
+
 | 例 | 何を見せているか |
 | --- | --- |
 | [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを claim するアクティビティの書き方 |
-| [`example/approval/`](example/approval/) | ステップの間で signal を待つ。承認されなければ予約を取り消す。分岐の前に `s.Err()` を見る理由も |
+| [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか |
+| [`example/state/`](example/state/) | 入力が多い saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ |
+| [`example/childflow/`](example/childflow/) | ステップが子ワークフロー。アクティビティと混在しても1つの逆順で巻き戻る |
+| [`example/approval/`](example/approval/) | ステップの間で signal を待つ。分岐の前に `s.Err()` を見る理由も |
 
-どちらも `docs/specs/` の仕様から実際に動かしています。
+形ごとの書き方は [docs/patterns.md](docs/patterns.md) にまとめてあります。
 
 ## API・設定
 
 | | |
 | --- | --- |
 | `saga.Run(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
-| `saga.Step(ctx, s, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
+| `saga.Step(ctx, s, name, fwd, undo, in)` | forward のアクティビティを1つ実行し、その補償を登録する |
+| `saga.ChildStep(ctx, s, name, fwd, undo, in)` | 同じことを子ワークフローで行う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
 | `saga.IdempotencyKey(ctx)` | アクティビティ側から冪等キーを読む |
+| `saga.IdempotencyKeyOf(ctx)` | 子ワークフロー側から冪等キーを読む |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 
 `CompensationBudget` は必須です。補償は外から誰もキャンセルできない context で走るので、

@@ -19,10 +19,10 @@ description: >-
 | --- | --- |
 | `saga/` | ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ実行して補償を登録する。 |
 | `saga/saga_test.go` | インメモリのテスト環境に対するユニットテスト。 |
-| `docs/` | ドキュメント。`design.md`、`activity-contract.md`、`development.md`。 |
+| `docs/` | ドキュメント。`design.md`、`patterns.md`、`activity-contract.md`、`development.md`。 |
 | `docs/specs/` | Gauge の markdown で書かれた実行される仕様。日本語。スイートが起動する実際の dev server に対して実行する。場所は `env/default/default.properties` の `gauge_specs_dir` が決める。 |
 | `stepImpl/` | そのステップの Go 実装と、サーバとワーカーを起動するスイートフック。 |
-| `example/order/` | 仕様が動かす saga であり、アクティビティ側の契約の実装例。通常パッケージに置く — Gauge はテストバイナリではなくモジュールをビルドするので、`_test.go` には置けない。 |
+| `example/*/` | 仕様が動かす saga。**1テーマ1 example**。通常パッケージに置く — Gauge はテストバイナリではなくモジュールをビルドするので、`_test.go` には置けない。 |
 
 `internal/` には何も置かない。手で動かすアプリケーションも無い。`internal/` の
 ライブラリはモジュールの外から import できないし、かつての worker / starter
@@ -71,6 +71,10 @@ Temporal のインメモリのテスト環境は、**キャンセルされた co
   `Unwrap() error` を辿る型スイッチなので、join したエラーは型名 `joinError`、原因
   チェーン無しで記録され、`NonRetryableErrorTypes` の照合も効かなくなる。
 - **補償の予算は必須。** disconnected context は外から誰もキャンセルできないため。
+- **ステップはアクティビティに限らない。** `ChildStep` が子ワークフローを同じ形で
+  扱う。中核（補償を先に積む、同じ鍵、逆順、予算）は `saga/step.go` の `register` に
+  あり、executor ごとに違うのは3点だけ（実行の呼び出し、鍵を載せる場所、予算で切る
+  対象）。ローカルアクティビティは `LocalActivityOptions` に ID が無いので対象外。
 
 ## saga のステップを足す
 
