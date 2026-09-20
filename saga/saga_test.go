@@ -123,7 +123,7 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 				undo = a.UndoFails
 			}
 
-			v, _ := saga.Step(ctx, s, spec.Name, a.Do, undo, req{Step: spec.Name, Fail: spec.Fail})
+			v, _ := saga.ActivityStep(ctx, s, spec.Name, a.Do, undo, req{Step: spec.Name, Fail: spec.Fail})
 			out = append(out, v)
 
 			if p.SleepAfter == i {
@@ -483,9 +483,9 @@ func mixedWorkflow(ctx workflow.Context) ([]string, error) {
 		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
 		CompensationBudget:  5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
-		saga.Step(ctx, s, "a", a.Do, a.Undo, req{Step: "a"})
-		saga.ChildStep(ctx, s, "b", childDo, childUndo, req{Step: "b"})
-		saga.Step(ctx, s, "c", a.Do, a.Undo, req{Step: "c", Fail: true})
+		saga.ActivityStep(ctx, s, "a", a.Do, a.Undo, req{Step: "a"})
+		saga.ChildWorkflowStep(ctx, s, "b", childDo, childUndo, req{Step: "b"})
+		saga.ActivityStep(ctx, s, "c", a.Do, a.Undo, req{Step: "c", Fail: true})
 		return nil, s.Err()
 	})
 }
@@ -545,9 +545,9 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 		CompensationBudget:  5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		if failFirst {
-			saga.Step(ctx, s, "a", a.Do, a.Undo, req{Step: "a", Fail: true})
+			saga.ActivityStep(ctx, s, "a", a.Do, a.Undo, req{Step: "a", Fail: true})
 		}
-		return saga.InlineStep(ctx, s, "wait", waitStep, nil, struct{}{})
+		return saga.FuncStep(ctx, s, "wait", waitStep, nil, struct{}{})
 	})
 }
 
@@ -608,7 +608,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
 		CompensationBudget:  5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
-		saga.Step(ctx, s, "reserve", a.Do, a.Undo, req{Step: "reserve", Fail: true})
+		saga.ActivityStep(ctx, s, "reserve", a.Do, a.Undo, req{Step: "reserve", Fail: true})
 
 		_, ok := saga.AwaitSignal[string](ctx, "approval", time.Second)
 		if !ok {

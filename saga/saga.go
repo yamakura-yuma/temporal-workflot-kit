@@ -87,7 +87,7 @@ type undo struct {
 // body returning a nil error is not enough to be treated as success: if any
 // step inside it failed, Run compensates and returns that error, discarding
 // body's return value. That is deliberate. With the sticky-error behaviour of
-// Step, a caller who forgets to check an error would otherwise return a
+// ActivityStep, a caller who forgets to check an error would otherwise return a
 // half-filled result and the workflow would be recorded as completed with its
 // side effects half applied.
 //
@@ -160,7 +160,7 @@ func DefaultKey(ctx workflow.Context, name string) string {
 }
 
 // Err reports the first error a step reported, if any. Once it is non-nil every
-// later Step is a no-op, so a linear saga can skip the error check between
+// later step is a no-op, so a linear saga can skip the error check between
 // steps and let Run deal with the outcome.
 func (s *Saga) Err() error { return s.err }
 
@@ -174,10 +174,10 @@ func (s *Saga) Clear() { s.err = nil }
 
 // Add registers a compensation that is not a plain activity -- a child
 // workflow, a local activity, a signal to another workflow. It is the escape
-// hatch from Step, which only covers activities.
+// hatch from the four step constructors, for a compensation none of them fits.
 //
 // Register the compensation before starting the work it undoes, for the same
-// reason Step does: an operation that times out may still have taken effect.
+// reason a step does: an operation that times out may still have taken effect.
 func (s *Saga) Add(name string, run func(workflow.Context) error) {
 	s.undos = append(s.undos, undo{name: name, run: run})
 }
@@ -262,7 +262,7 @@ func withBudget(ctx workflow.Context, remaining time.Duration) workflow.Context 
 // whether there is a budget at all. It returns false outside the compensation
 // phase.
 //
-// Step and ChildStep use it to clamp their own timeouts. Call it from a
+// ActivityStep and ChildWorkflowStep use it to clamp their own timeouts. Call it from a
 // compensation registered with Add, which the library cannot clamp for you.
 func RemainingBudget(ctx workflow.Context) (time.Duration, bool) {
 	d, ok := ctx.Value(budgetKey{}).(time.Duration)

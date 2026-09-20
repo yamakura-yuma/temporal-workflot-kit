@@ -7,7 +7,7 @@ import (
 )
 
 // A step is a forward call paired with the call that undoes it. What the two
-// calls *are* is not part of that idea: Step runs activities, ChildStep runs
+// calls *are* is not part of that idea: Step runs activities, ChildWorkflowStep runs
 // child workflows, and both go through register below.
 //
 // Only three things differ between them, and each is confined to the closures
@@ -86,7 +86,7 @@ func register[In, Out any](ctx workflow.Context, s *Saga, name string, in In, h 
 // After any step fails, later Step calls return that error without running
 // anything, so a linear saga can ignore the returned error and let Run decide
 // the outcome. undo may be nil for a step with nothing to undo.
-func Step[In, Out any](
+func ActivityStep[In, Out any](
 	ctx workflow.Context,
 	s *Saga,
 	name string,
@@ -128,7 +128,7 @@ func Step[In, Out any](
 	return register(ctx, s, name, in, h)
 }
 
-// ChildStep runs one forward child workflow and registers its compensation,
+// ChildWorkflowStep runs one forward child workflow and registers its compensation,
 // which is also a child workflow. It is Step for work that is a workflow rather
 // than an activity: a sub-saga, or anything long enough to deserve its own
 // history.
@@ -145,7 +145,7 @@ func Step[In, Out any](
 // ordinary way with workflow.WithChildOptions before calling. The compensation
 // child's execution timeout is clamped to what is left of the compensation
 // budget.
-func ChildStep[In, Out any](
+func ChildWorkflowStep[In, Out any](
 	ctx workflow.Context,
 	s *Saga,
 	name string,
@@ -182,7 +182,7 @@ func ChildStep[In, Out any](
 	return register(ctx, s, name, in, h)
 }
 
-// InlineStep runs workflow code as a step: the function is called here, in this
+// FuncStep runs workflow code as a step: the function is called here, in this
 // workflow, rather than dispatched anywhere.
 //
 // It is for work that has to happen in the workflow itself and can still fail
@@ -201,7 +201,7 @@ func ChildStep[In, Out any](
 // With it, that judgement lives in a function of the caller's own, next to the
 // activities, and the body reads:
 //
-//	saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+//	saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 //
 // Like every step it is skipped once an earlier step has failed, so a saga on
 // its way to being rolled back does not stop to wait for a human.
@@ -213,7 +213,7 @@ func ChildStep[In, Out any](
 // No idempotency key is minted, because nothing is executed anywhere that could
 // run twice. The step name still has to be unique, since it names the step in
 // the compensation report.
-func InlineStep[In, Out any](
+func FuncStep[In, Out any](
 	ctx workflow.Context,
 	s *Saga,
 	name string,

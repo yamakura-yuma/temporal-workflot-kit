@@ -28,7 +28,7 @@ type Signal struct {
 // again if the saga fails. undo may be the zero Signal for a step with nothing
 // to undo.
 //
-// Unlike Step and ChildStep this carries no idempotency key, because
+// Unlike Step and ChildWorkflowStep this carries no idempotency key, because
 // SignalExternalWorkflow has no options struct to put one in. The target is
 // identified by the workflow id in the Signal, and **making the receiving
 // workflow tolerant of a repeated signal is the receiver's job**. In practice
@@ -68,7 +68,7 @@ func SignalStep[In any](
 // reports whether one arrived before the timeout.
 //
 // It is a plain helper, not a step: waiting has no side effect, so there is
-// nothing to register and nothing to undo. Wrap it in an InlineStep, which is
+// nothing to register and nothing to undo. Wrap it in an FuncStep, which is
 // what turns "nobody answered" into a failure of the saga and makes the wait
 // skippable once an earlier step has failed:
 //
@@ -83,7 +83,7 @@ func SignalStep[In any](
 //	    return decision, nil
 //	}
 //
-//	saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+//	saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 //
 // Called directly in the body of a saga it will wait its full timeout even
 // after a step has failed, which is the reason to wrap it.

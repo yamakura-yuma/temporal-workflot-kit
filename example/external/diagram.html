@@ -130,8 +130,8 @@
 <h2>3つ目の executor</h2>
 <table>
   <tr><th></th><th>実行</th><th>冪等キー</th><th>予算で切る対象</th></tr>
-  <tr><td><code>saga.Step</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
-  <tr><td><code>saga.ChildStep</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
+  <tr><td><code>saga.ActivityStep</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
+  <tr><td><code>saga.ChildWorkflowStep</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
   <tr><td><code>saga.SignalStep</code></td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
 </table>
 

@@ -10,7 +10,7 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 
 ## レイアウト
 
-- `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ
+- `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`ActivityStep` が forward を1つ
   実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
 - `docs/` — ドキュメント。`design.md`（なぜこの形か）、`patterns.md`（よくある形と
   example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
@@ -24,11 +24,11 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
   契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
   通常パッケージに置く
-- `example/approval/` — signal 待ちを `saga.InlineStep` でステップにする例。
+- `example/approval/` — signal 待ちを `saga.FuncStep` でステップにする例。
   アクティビティは order のものを使い、待つ部分だけを見せる
 - `example/pipeline/` — 前段の出力が次段の入力になる例
 - `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例
-- `example/childflow/` — ステップが子ワークフローの例（`saga.ChildStep`）
+- `example/childflow/` — ステップが子ワークフローの例（`saga.ChildWorkflowStep`）
 - `example/external/` — signal で他のワークフローを動かす例（`saga.SignalStep`）
 
 example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。

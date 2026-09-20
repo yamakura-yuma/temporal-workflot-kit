@@ -8,10 +8,10 @@
 
 | 知りたいこと | 答え | 実物 | 図 |
 | --- | --- | --- | --- |
-| ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildStep` でステップになる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
+| ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildWorkflowStep` でステップになる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
 | アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
 | `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
-| signal を待つには | `saga.InlineStep` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
+| signal を待つには | `saga.FuncStep` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
 | signal を送るステップは書けるか | 書ける。`saga.SignalStep`。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
 | 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
@@ -19,16 +19,22 @@
 
 ## ステップを子ワークフローにする
 
-`Step` と `ChildStep` は形が同じで、違うのは第1引数の型だけです。`context.Context` なら
+`ActivityStep` と `ChildWorkflowStep` は形が同じで、違うのは第1引数の型だけです。`context.Context` なら
 アクティビティ、`workflow.Context` なら子ワークフロー。Temporal 自身の区別と同じなので、
 名前を覚えるのではなく型が教えてくれます。
 
 ```go
 // アクティビティのステップ
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
 
 // 子ワークフローのステップ
-pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+pack, _ := saga.ChildWorkflowStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+
+// 外部ワークフローへの signal のステップ
+saga.SignalStep(ctx, s, "hold", holdSignal, releaseSignal, HoldReq{SKU: in.SKU})
+
+// 自分のワークフローコードのステップ
+saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 ```
 
 混ぜられます。補償のレジストリは executor を区別しないので、巻き戻しは1つの逆順で回ります。
@@ -57,8 +63,8 @@ func UnpackWorkflow(ctx workflow.Context, req PackReq) error {
 渡せます。前段の出力を次段のリクエストに入れるだけ。
 
 ```go
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
+res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund,
     ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
 ```
 
@@ -100,9 +106,9 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 }
 ```
 
-`Step` と `ChildStep` は `ctx` と `s` を引数で取るので、メソッドでも関数でも好きに割れます。
+`ActivityStep` と `ChildWorkflowStep` は `ctx` と `s` を引数で取るので、メソッドでも関数でも好きに割れます。
 
-**state 構造体そのものを `Step` に渡すことはできません。** `Step` の入力はアクティビティの
+**state 構造体そのものを `ActivityStep` に渡すことはできません。** `ActivityStep` の入力はアクティビティの
 引数なので、シリアライズ可能である必要があります。メソッドの中で state からリクエストを
 組んでください。
 
@@ -112,11 +118,11 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 
 ## signal を待つ
 
-待つ処理も**ステップにします**。`saga.InlineStep` が、利用者の書いたワークフローコードを
+待つ処理も**ステップにします**。`saga.FuncStep` が、利用者の書いたワークフローコードを
 その場で呼んでステップに変えます。
 
 ```go
-saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
 ```
 
 判断は `awaitApproval` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
@@ -138,15 +144,15 @@ func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
 ステップなので、**先のステップが失敗していれば飛ばされます**。ロールバックに向かっている
 saga が人の承認を1時間待って止まることはありません。
 
-`InlineStep` は signal 専用ではありません。ワークフローの中で実行する必要があって、かつ
+`FuncStep` は signal 専用ではありません。ワークフローの中で実行する必要があって、かつ
 saga を失敗させうるもの全般に使えます。`workflow.Await` で条件を待つ、経路を選ぶ、など。
 
 本体はステップの列のままになります。
 
 ```go
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
+res, _ := saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+saga.FuncStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
 ```
 
 **`s.Err()` のガードは要りません。** ステップが失敗していれば以降のステップは飛ばされ、

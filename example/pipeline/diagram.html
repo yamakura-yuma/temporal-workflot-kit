@@ -114,7 +114,7 @@
   手元にあります。自分のステップの出力が要る場合は、冪等キーで引いてください。
 </div>
 
-<pre><code>chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
+<pre><code>chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund,
     ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
 
 // Refund は同じ ChargeReq を受け取るので、req.Reservation が使える

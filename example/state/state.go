@@ -1,12 +1,12 @@
 // Package state is the example for keeping the body of a saga short.
 //
 // Once the requests an activity takes have more than a couple of fields, a saga
-// written inline turns into a wall: every saga.Step call carries a literal that
+// written inline turns into a wall: every saga.ActivityStep call carries a literal that
 // restates half the workflow input. Here the workflow input and everything the
 // steps produce live in one struct, each step is a method on it, and the
 // closure passed to saga.Run is two lines.
 //
-// The one rule to keep in mind is that saga.Step's input is an activity
+// The one rule to keep in mind is that saga.ActivityStep's input is an activity
 // argument, so it has to be serializable. The state struct itself never goes to
 // an activity; the methods build a request from it.
 package state
@@ -118,7 +118,7 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 func (w *fulfillment) reserve(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
-	w.reservation, _ = saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{
+	w.reservation, _ = saga.ActivityStep(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{
 		Order:    w.in.ID,
 		SKU:      w.in.SKU,
 		Quantity: w.in.Quantity,
@@ -129,7 +129,7 @@ func (w *fulfillment) reserve(ctx workflow.Context, s *saga.Saga) {
 func (w *fulfillment) chargeCard(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
-	w.charge, _ = saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{
+	w.charge, _ = saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{
 		Order:       w.in.ID,
 		Customer:    w.in.Customer,
 		Amount:      w.in.Amount,
@@ -143,7 +143,7 @@ func (w *fulfillment) chargeCard(ctx workflow.Context, s *saga.Saga) {
 func (w *fulfillment) ship(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
-	w.shipment, _ = saga.Step(ctx, s, "ship", a.Ship, a.CancelShipment, ShipReq{
+	w.shipment, _ = saga.ActivityStep(ctx, s, "ship", a.Ship, a.CancelShipment, ShipReq{
 		Order:   w.in.ID,
 		Address: w.in.Address,
 		Charge:  w.charge,

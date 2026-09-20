@@ -6,7 +6,7 @@
 // fails.
 //
 // This is the third kind of step, and the weakest of the three. Unlike Step and
-// ChildStep it carries no idempotency key, because SignalExternalWorkflow has
+// ChildWorkflowStep it carries no idempotency key, because SignalExternalWorkflow has
 // no options struct to put one in. What the saga still guarantees is the
 // pairing: if the saga fails after the hold was sent, the release is sent.
 package external
@@ -83,7 +83,7 @@ func ExternalWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 			saga.Signal{WorkflowID: in.Inventory, Name: ReleaseSignal},
 			HoldReq{Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
 
-		chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
+		chg, _ := saga.ActivityStep(ctx, s, "charge", a.Charge, a.Refund,
 			ChargeReq{Order: in.ID, Amount: in.Amount, Fail: in.FailAt == "charge"})
 
 		return Receipt{Charge: chg}, nil
