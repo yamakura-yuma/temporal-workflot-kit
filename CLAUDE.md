@@ -23,6 +23,8 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
   契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
   通常パッケージに置く
+- `example/approval/` — ステップの間で signal を待つ例。アクティビティは order の
+  ものを使い、signal の部分だけを見せる
 
 ここにアプリケーションは無く、`internal/` も無い。このリポジトリはライブラリであり、
 `internal/` に置いたライブラリはモジュールの外から import できないため。

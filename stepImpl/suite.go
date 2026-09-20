@@ -21,6 +21,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 
+	"github.com/yamakura-yuma/temporal-saga/example/approval"
 	"github.com/yamakura-yuma/temporal-saga/example/order"
 )
 
@@ -30,6 +31,7 @@ var (
 	devServer      *testsuite.DevServer
 	temporalClient client.Client
 	temporalWorker worker.Worker
+	approvalWorker worker.Worker
 	ledger         *order.Ledger
 )
 
@@ -59,15 +61,29 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	temporalClient = devServer.Client()
 	ledger = order.NewLedger()
 
+	activities := order.NewActivities(ledger)
+
 	temporalWorker = worker.New(temporalClient, order.TaskQueue, worker.Options{})
 	temporalWorker.RegisterWorkflow(order.OrderWorkflow)
-	temporalWorker.RegisterActivity(order.NewActivities(ledger))
+	temporalWorker.RegisterActivity(activities)
 	if err := temporalWorker.Start(); err != nil {
 		fail("start the worker: %v", err)
+	}
+
+	// The approval example declares its own task queue, so it needs its own
+	// worker. The activities are the same instance, so both share one ledger.
+	approvalWorker = worker.New(temporalClient, approval.TaskQueue, worker.Options{})
+	approvalWorker.RegisterWorkflow(approval.ApprovalWorkflow)
+	approvalWorker.RegisterActivity(activities)
+	if err := approvalWorker.Start(); err != nil {
+		fail("start the approval worker: %v", err)
 	}
 }, []string{}, testsuit.AND)
 
 var _ = gauge.AfterSuite(func(*m.ExecutionInfo) {
+	if approvalWorker != nil {
+		approvalWorker.Stop()
+	}
 	if temporalWorker != nil {
 		temporalWorker.Stop()
 	}

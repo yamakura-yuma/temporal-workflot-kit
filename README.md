@@ -2,9 +2,46 @@
 
 Temporal で、取り消せるアクティビティの列を書くための Go ライブラリ。
 
-```go
-import "github.com/yamakura-yuma/temporal-saga/saga"
+在庫を押さえて、課金して、配送を手配する。途中で失敗したら、そこまでに起きたことを
+逆順で取り消す。その「取り消す」側を書くのが面倒で、しかも間違えやすい。そこを引き受け
+ます。
 
+## デモ
+
+同じ saga を、素の SDK で書いた場合とこのライブラリで書いた場合。
+
+### 素の SDK で書くと
+
+```go
+func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
+    var undo []func(workflow.Context) error
+
+    var res string
+    if err := workflow.ExecuteActivity(ctx, a.Reserve, in).Get(ctx, &res); err != nil {
+        return Receipt{}, err
+    }
+    undo = append(undo, func(c workflow.Context) error {
+        return workflow.ExecuteActivity(c, a.Unreserve, in).Get(c, nil)
+    })
+    //  ↑ 成功した後に積んでいる。タイムアウトしたアクティビティは
+    //    ワーカー上で完走しているかもしれないのに、取り消されない
+
+    var chg string
+    if err := workflow.ExecuteActivity(ctx, a.Charge, in).Get(ctx, &chg); err != nil {
+        for i := len(undo) - 1; i >= 0; i-- {
+            undo[i](ctx)
+            //  ↑ ctx がキャンセル済みなら、ここは全部即座に失敗する。
+            //    キャンセルこそ取り消しが要る場面なのに
+        }
+        return Receipt{}, err
+    }
+    // ... ship も同じことを書く
+}
+```
+
+### このライブラリで書くと
+
+```go
 func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
     var a *Activities
 
@@ -21,13 +58,12 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 }
 ```
 
-`charge` で落ちれば、`charge`、`reserve` の順に取り消され、ワークフローは元のエラーで
-失敗します。
+ステップのエラーを `_` で捨てているのは手抜きではありません。最初の失敗以降、後続の
+`Step` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
+外に出ません。
 
-## デモ
-
-振る舞いは `docs/specs/` に実行できる仕様として置いてあります。`just spec` が実際の
-Temporal dev server を起動して、この通りに動くか確かめます。
+振る舞いは `docs/specs/` に実行できる仕様として置いてあり、`just spec` が実際の Temporal
+dev server を起動して確かめます。
 
 ```
 ## キャンセルされた saga もロールバックされる
@@ -39,32 +75,20 @@ Temporal dev server を起動して、この通りに動くか確かめます。
 * 注文は "reserve, charge" を保持していない
 ```
 
-```console
-$ just spec
-Specifications:	1 executed	1 passed	0 failed	0 skipped
-Scenarios:	4 executed	4 passed	0 failed	0 skipped
-```
-
-「ステップ ... が実行された」はワークフロー履歴を読んでいます。つまり運用が Temporal の
-UI で見る順序そのもの。
-
 ## 機能・特徴
 
-Temporal の SDK に saga のヘルパーはありません。公式サンプルの `Compensations` は
-スライスと逆順ループで30行ほどで、たいていはそれで足ります。足りなくなるのは次の4点を
-踏んだときで、どれも異常系でしか表に出ません。
+| 機能 | 中身 |
+| --- | --- |
+| ロールバック | 失敗すると、登録済みの補償を逆順で実行する |
+| キャンセル対応 | ワークフローがキャンセルされても補償は実行される |
+| 冪等キーの払い出し | ステップごとにキーを作り、forward と補償の両方に渡す |
+| 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
+| 失敗の報告 | 補償が失敗したら、型付きのエラーと検索属性で残す。元のエラーは消さない |
+| 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
+| 逃げ道 | 子ワークフローなど、アクティビティ以外も補償に登録できる |
 
-- **キャンセルされても補償が動く。** キャンセル済みの context は以降のアクティビティを
-  即座に失敗させるので、素直に書いた補償は一番必要な場面で何もしません
-- **タイムアウトしたステップも取り消される。** 補償を forward の実行前に登録するため
-- **forward と補償が同じ冪等キーを見る。** キーは run ID とステップ名から決まる
-- **エラーチェックを1つ忘れても、壊れた成功にならない。** ステップが失敗していれば
-  `Run` がワークフローを失敗させ、半端な戻り値を捨てる
-
-`fwd` と `undo` は型付きの関数で受けるので、入れ替えはコンパイルエラーになります。
-SDK はここを見ていません。
-
-理由と実装は [docs/design.md](docs/design.md) に。
+なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
+コード付きで書いてあります。
 
 ## インストール・セットアップ
 
@@ -77,14 +101,22 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 
 ## 使用方法
 
-冒頭のコードがそのまま使い方です。`saga.Run` にワークフロー本体を渡し、各ステップを
-`saga.Step` で書きます。ステップのエラーは、直線的な saga なら無視して構いません。
-最初の失敗以降、後続の `Step` は何もせず、`Run` がまとめて面倒を見ます。
+デモの後半がそのまま使い方です。`saga.Run` にワークフロー本体を渡し、各ステップを
+`saga.Step` で書きます。
 
 アクティビティ側には2つだけ約束があります。forward は冪等キーを**原子的に** claim する
 こと、補償は取り消すものが無いときに成功すること。どちらも外すとロールバックが壊れるので、
 [docs/activity-contract.md](docs/activity-contract.md) を先に読んでください。塞げていない
 穴も同じ文書に書いてあります。
+
+### 他のパターン
+
+| 例 | 何を見せているか |
+| --- | --- |
+| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを claim するアクティビティの書き方 |
+| [`example/approval/`](example/approval/) | ステップの間で signal を待つ。承認されなければ予約を取り消す。分岐の前に `s.Err()` を見る理由も |
+
+どちらも `docs/specs/` の仕様から実際に動かしています。
 
 ## API・設定
 
