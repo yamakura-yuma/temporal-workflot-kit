@@ -1,12 +1,6 @@
-// Package order is an example saga: it reserves stock, charges a card and
-// books a shipment, undoing whatever already happened if a later step fails.
-//
-// The activities keep their ledger in memory, which is only honest for a demo.
-// What is not a shortcut is the shape of that ledger: each activity claims its
-// idempotency key atomically before doing any work, and each compensation
-// succeeds when it finds no claim to undo. That is the contract the saga
-// package relies on, and it is the part worth copying.
-package order
+//go:build integration
+
+package integration
 
 import (
 	"context"
@@ -18,17 +12,23 @@ import (
 	"github.com/yamakura-yuma/temporal-saga/saga"
 )
 
-// Order is the workflow input.
+// Order is the workflow input. The Fail* fields exist so a test can force a
+// particular failure; everything else is what a real order would carry.
 type Order struct {
 	ID     string `json:"id"`
 	SKU    string `json:"sku"`
 	Amount int    `json:"amount"`
-	// FailAt names a step that should fail, so the example can demonstrate a
-	// rollback. Empty means the happy path.
+
+	// FailAt names a step whose forward activity should fail.
 	FailAt string `json:"fail_at,omitempty"`
-	// HoldSeconds keeps the workflow waiting after the charge step, long enough
-	// to cancel it from the CLI and watch the compensations still run.
+	// FailUndo names a step whose compensation should fail.
+	FailUndo string `json:"fail_undo,omitempty"`
+	// HoldSeconds keeps the workflow waiting after the charge step, so a test
+	// can cancel it mid-saga.
 	HoldSeconds int `json:"hold_seconds,omitempty"`
+	// MarkAttribute asks the saga to flag a failed rollback with a search
+	// attribute.
+	MarkAttribute bool `json:"mark_attribute,omitempty"`
 }
 
 // Receipt is the workflow output.
@@ -38,24 +38,27 @@ type Receipt struct {
 	Shipment    string `json:"shipment"`
 }
 
-// Reservation, Charge and Shipment are the per-step payloads.
+// The per-step payloads. Each carries the whole order, so a compensation has
+// the same input its forward step had.
 type (
 	ReserveReq struct {
-		Order  Order  `json:"order"`
-		FailAt string `json:"fail_at,omitempty"`
+		Order Order `json:"order"`
 	}
 	ChargeReq struct {
-		Order  Order  `json:"order"`
-		FailAt string `json:"fail_at,omitempty"`
+		Order Order `json:"order"`
 	}
 	ShipReq struct {
-		Order  Order  `json:"order"`
-		FailAt string `json:"fail_at,omitempty"`
+		Order Order `json:"order"`
 	}
 )
 
-// Activities holds the demo ledger. Register a single instance on the worker so
-// that every activity shares it.
+// Activities is the worked example of the contract the saga package puts on
+// activities: claim the idempotency key atomically before doing any work, and
+// succeed when a compensation finds nothing to undo.
+//
+// The ledger is in memory, which is only honest for a test. Its shape is not:
+// a real one needs the same atomicity from its store -- a unique constraint,
+// INSERT ... ON CONFLICT, or the downstream API's own idempotency-key header.
 type Activities struct {
 	mu     sync.Mutex
 	claims map[string]string // idempotency key -> the id handed out for it
@@ -66,15 +69,14 @@ func NewActivities() *Activities {
 	return &Activities{claims: map[string]string{}}
 }
 
-// claim records that key has been acted on, and returns the id assigned to it.
+// claim records that key has been acted on and returns the id assigned to it.
 // The second result reports whether this call is the one that did the work; a
 // retry of the same key gets the original id and false.
 //
-// The lock is what makes the check-and-act atomic. A real activity needs the
-// same property from its store -- a unique constraint, INSERT ... ON CONFLICT,
-// or the downstream API's idempotency-key header. Reading first and writing
-// afterwards is not equivalent: two attempts of the same activity can be in
-// flight at once after a timeout, and both would see the key as unused.
+// Holding the lock across the read and the write is the point. Checking whether
+// the key was used and then acting on it is not equivalent: two attempts of the
+// same activity can be in flight at once after a timeout, and both would see
+// the key as unused.
 func (a *Activities) claim(key, id string) (string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -96,6 +98,15 @@ func (a *Activities) release(key string) bool {
 	return true
 }
 
+// held reports whether a key is currently claimed. Tests use it to check that
+// a rollback actually undid everything.
+func (a *Activities) held(key string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.claims[key]
+	return ok
+}
+
 func key(ctx context.Context, fallback string) string {
 	if k, ok := saga.IdempotencyKey(ctx); ok {
 		return k
@@ -111,7 +122,7 @@ func (a *Activities) Reserve(ctx context.Context, req ReserveReq) (string, error
 	if !fresh {
 		return id, nil
 	}
-	if req.FailAt == "reserve" {
+	if req.Order.FailAt == "reserve" {
 		a.release(k)
 		return "", fmt.Errorf("reserve: no stock for %s", req.Order.SKU)
 	}
@@ -123,6 +134,9 @@ func (a *Activities) Reserve(ctx context.Context, req ReserveReq) (string, error
 // to release, which is what lets the saga register it before Reserve runs.
 func (a *Activities) Unreserve(ctx context.Context, req ReserveReq) error {
 	k := key(ctx, "reserve/"+req.Order.ID)
+	if req.Order.FailUndo == "reserve" {
+		return fmt.Errorf("unreserve: warehouse unreachable for %s", req.Order.ID)
+	}
 	if !a.release(k) {
 		logf(ctx, "unreserve: nothing held for %s, nothing to do", req.Order.ID)
 		return nil
@@ -138,7 +152,7 @@ func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) 
 	if !fresh {
 		return id, nil
 	}
-	if req.FailAt == "charge" {
+	if req.Order.FailAt == "charge" {
 		a.release(k)
 		return "", fmt.Errorf("charge: card declined for %s", req.Order.ID)
 	}
@@ -149,6 +163,9 @@ func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) 
 // Refund reverses Charge.
 func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 	k := key(ctx, "charge/"+req.Order.ID)
+	if req.Order.FailUndo == "charge" {
+		return fmt.Errorf("refund: gateway unreachable for %s", req.Order.ID)
+	}
 	if !a.release(k) {
 		logf(ctx, "refund: no charge recorded for %s, nothing to do", req.Order.ID)
 		return nil
@@ -164,7 +181,7 @@ func (a *Activities) Ship(ctx context.Context, req ShipReq) (string, error) {
 	if !fresh {
 		return id, nil
 	}
-	if req.FailAt == "ship" {
+	if req.Order.FailAt == "ship" {
 		a.release(k)
 		return "", fmt.Errorf("ship: no carrier available for %s", req.Order.ID)
 	}
@@ -175,6 +192,9 @@ func (a *Activities) Ship(ctx context.Context, req ShipReq) (string, error) {
 // CancelShipment reverses Ship.
 func (a *Activities) CancelShipment(ctx context.Context, req ShipReq) error {
 	k := key(ctx, "ship/"+req.Order.ID)
+	if req.Order.FailUndo == "ship" {
+		return fmt.Errorf("cancel-shipment: carrier unreachable for %s", req.Order.ID)
+	}
 	if !a.release(k) {
 		logf(ctx, "cancel-shipment: nothing booked for %s, nothing to do", req.Order.ID)
 		return nil

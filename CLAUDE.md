@@ -12,14 +12,15 @@ easy to get wrong.
 ## Layout
 
 - `saga/` — the library. `Run` owns the rollback, `Step` runs one forward
-  activity and registers its compensation
-- `example/order/` — an example saga (reserve, charge, ship) with compensations
-- `example/worker/` — worker entrypoint (registers the workflow and activities,
-  polls a task queue)
-- `example/starter/` — starts a workflow execution; `-fail=<step>` forces a rollback
+  activity and registers its compensation. Unit tests run against Temporal's
+  in-memory test environment
+- `integration/` — an example saga (reserve, charge, ship) exercised against a
+  real Temporal dev server the tests start in-process. Build-tagged
+  `integration`; also the worked example of the activity contract
 
-Nothing lives under `internal/`: a library there cannot be imported from outside
-the module.
+There is no application here and nothing under `internal/`: this repo is a
+library, and a library under `internal/` cannot be imported from outside the
+module.
 
 ## Commands
 
@@ -29,13 +30,11 @@ Development happens inside the container built from `Dockerfile` (Go +
 `/workspace`, so edits are picked up without rebuilding.
 
 - `just` — list every recipe
-- `just build` / `just vet` / `just test` — Go build, vet, test
-- `just ci` — fmt-check, vet, build, test; run before shipping a change
-- `just up` — start the Temporal dev server and the worker in the background;
-  `just starter` then runs one workflow (`just starter --fail=charge` to watch a
-  rollback), `just down` stops everything
+- `just build` / `just vet` / `just test` — Go build, vet, unit tests
+- `just test-integration` — the library against a real Temporal dev server,
+  started in-process by the test
+- `just ci` — fmt-check, vet, build, both suites; run before shipping a change
 - `just shell` — interactive shell in the dev container
-- `just temporal <args>` — `temporal` CLI against the dev server
 
 ## Skills
 

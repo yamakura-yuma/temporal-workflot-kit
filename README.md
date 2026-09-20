@@ -71,7 +71,7 @@ Two things, and the first one is the hard one:
    registered before the work happens, so they will sometimes be called for a
    step that never took effect.
 
-`example/order/activity.go` shows the shape.
+`integration/order_test.go` is the worked example.
 
 ## What it does not solve
 
@@ -104,11 +104,15 @@ Everything runs inside the container built from `Dockerfile` (Go +
 install is needed.
 
 ```bash
-just ci                      # fmt-check, vet, build, test
-just up                      # Temporal dev server + worker
-just starter                 # run the example saga
-just starter --fail=charge   # watch the rollback
-just down
+just ci                 # fmt-check, vet, build, both test suites
+just test               # unit tests, against the in-memory test environment
+just test-integration   # against a real Temporal dev server, started by the test
 ```
+
+The split is not about speed. Temporal's test environment runs activities even
+on a canceled context and does not enforce activity timeouts, so the behaviour
+this library exists for -- the rollback that still happens after a cancel -- can
+only be pinned against a server. `integration/` starts one in-process with
+`testsuite.StartDevServer`, using the `temporal` CLI the dev image already has.
 
 See `CLAUDE.md` for the full command list.

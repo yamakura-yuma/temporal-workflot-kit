@@ -2,8 +2,8 @@
 name: saga-workflows
 description: >-
   Use when working on the saga library in this repo — the saga/ package, the
-  example workflow and activities under example/, or any change to how a step
-  and its compensation are wired. Covers the invariants the library depends on,
+  example workflow and activities under integration/, or any change to how a
+  step and its compensation are wired. Covers the invariants the library depends on,
   the contract it puts on activities, and the determinism, idempotency and
   retry rules a change has to satisfy before it ships.
 ---
@@ -12,19 +12,30 @@ description: >-
 
 This repo publishes `saga`, a package for running a sequence of Temporal
 activities that can be rolled back. It is a library, not an application: the
-workflow under `example/` exists to exercise it.
+workflow under `integration/` exists to exercise it, and is only built under
+the `integration` build tag.
 
 ## Where things live
 
 | | |
 | --- | --- |
 | `saga/` | The library. `Run` owns the rollback, `Step` runs one forward activity and registers its compensation. |
-| `example/order/` | An example saga: reserve, charge, ship, each with a compensation. |
-| `example/worker/` | Registers the workflow and one `Activities` instance, polls the task queue. |
-| `example/starter/` | Starts one execution. `-fail=<step>` forces a rollback. |
+| `saga/saga_test.go` | Unit tests against the in-memory test environment. |
+| `integration/` | An example saga (reserve, charge, ship) run against a real dev server the tests start in-process. Also the worked example of the activity contract. |
 
-Nothing belongs under `internal/`: a library that lives there cannot be
-imported by anyone outside this module.
+Nothing belongs under `internal/`, and there is no application to run by hand:
+a library under `internal/` cannot be imported from outside this module, and
+what the old worker and starter binaries demonstrated is now asserted by the
+integration tests.
+
+## Which suite a behaviour belongs in
+
+Temporal's in-memory test environment runs activities even on a canceled
+context and does not enforce activity timeouts. Anything that depends on either
+-- the rollback surviving a cancel, the compensated activity IDs appearing in
+the history in order, a search attribute being written -- has to go in
+`integration/`, or the test will pass while the behaviour is broken. Everything
+else belongs in `saga/`, where it runs in milliseconds.
 
 ## Invariants the library depends on
 
@@ -71,7 +82,7 @@ Each of these exists because the obvious alternative is broken. Do not
 
 ## Before the change ships
 
-Walk every changed file under `saga/` or `example/` against
+Walk every changed file under `saga/` or `integration/` against
 `references/checklist.md`. The three failure classes that matter most:
 
 1. **Non-determinism in workflow code** — anything that can produce a
@@ -88,6 +99,7 @@ Changing `saga/` changes the command sequence of every workflow that uses it,
 which breaks the replay of runs that are still open. Treat any edit that adds,
 removes or reorders a workflow command as a breaking change.
 
-Run `just ci` (fmt-check, vet, build, test, all inside the dev container). When
-the change touches the wiring, run it for real: `just up`, then
-`just starter --fail=charge` to watch the rollback.
+Run `just ci` (fmt-check, vet, build, both suites, all inside the dev
+container). `just test-integration` alone is the one to reach for when the
+change touches cancellation, activity IDs, or anything else the in-memory
+environment cannot show.

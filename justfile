@@ -33,13 +33,20 @@ run +args:
 build:
     {{dev}} go build ./...
 
-# Run go vet over every package.
+# Run go vet over every package, including the tagged integration tests.
 vet:
-    {{dev}} go vet ./...
+    {{dev}} go vet -tags=integration ./...
 
-# Extra args go to `go test`, e.g. `just test -run TestOrder -v`.
+# Unit tests: the saga package against the in-memory test environment.
+# Extra args go to `go test`, e.g. `just test -run TestBudget -v`.
 test *args:
     {{dev}} go test ./... {{args}}
+
+# Slower than `just test`, and the only place cancellation and search
+# attributes can actually be checked.
+# The library against a real Temporal dev server, started in-process by the test.
+test-integration *args:
+    {{dev}} go test -tags=integration -count=1 ./integration/ {{args}}
 
 # Format the tree in place.
 fmt:
@@ -54,34 +61,7 @@ tidy:
     {{dev}} go mod tidy
 
 # Everything that must pass before a change ships.
-ci: fmt-check vet build test
-
-# --- running the service -----------------------------------------------------
-
-# Start the Temporal dev server and the worker in the background.
-up:
-    docker compose up -d temporal worker
-
-# Same, but stream the logs in the foreground (ctrl-c stops).
-up-fg:
-    docker compose up temporal worker
-
-# Stop everything and remove the containers (named caches survive).
-down:
-    docker compose down
-
-# Follow the logs of the running services.
-logs *args:
-    docker compose logs -f {{args}}
-
-# Start one workflow execution against the running dev server. Extra args go to
-# the starter, e.g. `just starter --fail=charge` to watch the rollback.
-starter *args:
-    docker compose run --rm starter go run ./example/starter {{args}}
-
-# `temporal` CLI against the dev server, e.g. `just temporal workflow list`.
-temporal +args:
-    {{dev}} temporal --address temporal:7233 {{args}}
+ci: fmt-check vet build test test-integration
 
 # --- agent config ------------------------------------------------------------
 
