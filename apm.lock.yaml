@@ -1439,7 +1439,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:c943ae3ba4d483059e495b871bc5565146e22166314f8b0deea1ec3421d5230d
+  content_hash: sha256:8a168cf67912afd038c01c4adb8ac69bb3f4ff17ea6e83822c78e8dcb427f445
 - kind: project-relative
   target: claude
   value: .claude/skills/saga-workflows/references/checklist.md
@@ -1634,5 +1634,5 @@ local_deployed_files:
 - .claude/skills/saga-workflows/SKILL.md
 - .claude/skills/saga-workflows/references/checklist.md
 local_deployed_file_hashes:
-  .claude/skills/saga-workflows/SKILL.md: sha256:c943ae3ba4d483059e495b871bc5565146e22166314f8b0deea1ec3421d5230d
+  .claude/skills/saga-workflows/SKILL.md: sha256:8a168cf67912afd038c01c4adb8ac69bb3f4ff17ea6e83822c78e8dcb427f445
   .claude/skills/saga-workflows/references/checklist.md: sha256:43f7a3416ad7bcbdbbae611f4eb0fd4bc234f1f7a4cf87537a66e6a9a4077cdf

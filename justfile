@@ -44,16 +44,16 @@ test *args:
 
 # Slower than `just test`, and the only place cancellation and search attributes
 # can actually be checked.
-# Run the executable specifications under specs/, against a real dev server.
+# Run the executable specifications under docs/specs/, against a real dev server.
 spec *args:
-    {{dev}} gauge run specs {{args}}
+    {{dev}} gauge run {{args}}
 
-# Check every step in specs/ has an implementation, without running anything.
+# Check every step in docs/specs/ has an implementation, without running anything.
 spec-validate:
-    {{dev}} gauge validate specs
+    {{dev}} gauge validate
 
 # Show which Go function implements each step, since the only link between a
-# line in specs/ and the code is the step text.
+# line in docs/specs/ and the code is the step text.
 spec-steps:
     {{dev}} grep -rn '^var _ = gauge.Step("' stepImpl/ | sed -E 's/:var _ = gauge\.Step\("/  ->  /; s/".*$//'
 

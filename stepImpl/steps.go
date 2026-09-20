@@ -1,6 +1,6 @@
 package stepImpl
 
-// How a line in specs/ reaches the code below
+// How a line in docs/specs/ reaches the code below
 //
 // The only link is the step text. Gauge takes a line like
 //
@@ -12,7 +12,7 @@ package stepImpl
 //	gauge.Step("<step> が実行されたら saga をキャンセルする", func(step string) { ... })
 //
 // So to find what a line does, search this package for its text; to find where
-// a step is used, search specs/ for it. `just spec-steps` prints the pairing.
+// a step is used, search docs/specs/ for it. `just spec-steps` prints the pairing.
 // The arguments arrive in the order the placeholders appear in the text.
 //
 // Nothing in the compiler enforces the match, so `just spec-validate` does: it

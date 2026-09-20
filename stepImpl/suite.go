@@ -1,4 +1,4 @@
-// Package stepImpl implements the steps the specifications under specs/ are
+// Package stepImpl implements the steps the specifications under docs/specs/ are
 // written in.
 //
 // The suite runs one Temporal dev server and one worker for the whole run,

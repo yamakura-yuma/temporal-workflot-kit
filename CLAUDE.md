@@ -12,9 +12,13 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 
 - `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ
   実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
-- `specs/` — Gauge の markdown で書かれた実行される仕様。日本語。スイートが
+- `docs/` — ドキュメント。`design.md`（なぜこの形か）、`activity-contract.md`
+  （アクティビティ側の契約と、塞げていないこと）、`development.md`（開発手順）
+- `docs/specs/` — Gauge の markdown で書かれた実行される仕様。日本語。スイートが
   プロセス内に起動する実際の Temporal dev server に対して実行する。コードとの
-  対応づけはステップ文が `gauge.Step(...)` の文字列と一致することだけ
+  対応づけはステップ文が `gauge.Step(...)` の文字列と一致することだけ。場所は
+  `env/default/default.properties` の `gauge_specs_dir` で決まる（コマンドライン
+  引数では変わらない）
 - `stepImpl/` — そのステップの Go 実装と、サーバとワーカーを起動するスイートフック
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
   契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
@@ -32,7 +36,7 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 
 - `just` — レシピ一覧
 - `just build` / `just vet` / `just test` — Go のビルド、vet、ユニットテスト
-- `just spec` — `specs/` の仕様を実際の dev server に対して実行
+- `just spec` — `docs/specs/` の仕様を実際の dev server に対して実行
 - `just spec-validate` — 全ステップに実装があるかを、実行せずに確認
 - `just spec-steps` — どの Go 関数がどのステップを実装しているかの対応表
 - `just ci` — fmt-check, vet, build, ユニットテスト, spec-validate, spec。変更を

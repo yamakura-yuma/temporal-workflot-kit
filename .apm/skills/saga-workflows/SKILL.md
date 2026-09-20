@@ -1,7 +1,7 @@
 ---
 name: saga-workflows
 description: >-
-  このリポジトリの saga ライブラリを触るときに使う — saga/ パッケージ、specs/ の
+  このリポジトリの saga ライブラリを触るときに使う — saga/ パッケージ、docs/specs/ の
   仕様とその実装 stepImpl/、example/order/ の例、あるいはステップと補償の配線を
   変えるとき。ライブラリが依存している不変条件、アクティビティ側に課される契約、
   変更を出す前に満たすべき決定性・冪等性・リトライの規則を扱う。
@@ -19,7 +19,8 @@ description: >-
 | --- | --- |
 | `saga/` | ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ実行して補償を登録する。 |
 | `saga/saga_test.go` | インメモリのテスト環境に対するユニットテスト。 |
-| `specs/` | Gauge の markdown で書かれた実行される仕様。日本語。スイートが起動する実際の dev server に対して実行する。 |
+| `docs/` | ドキュメント。`design.md`、`activity-contract.md`、`development.md`。 |
+| `docs/specs/` | Gauge の markdown で書かれた実行される仕様。日本語。スイートが起動する実際の dev server に対して実行する。場所は `env/default/default.properties` の `gauge_specs_dir` が決める。 |
 | `stepImpl/` | そのステップの Go 実装と、サーバとワーカーを起動するスイートフック。 |
 | `example/order/` | 仕様が動かす saga であり、アクティビティ側の契約の実装例。通常パッケージに置く — Gauge はテストバイナリではなくモジュールをビルドするので、`_test.go` には置けない。 |
 
@@ -32,7 +33,7 @@ description: >-
 Temporal のインメモリのテスト環境は、**キャンセルされた context でもアクティビティを
 実行し、アクティビティのタイムアウトも課さない**。どちらかに依存する振る舞い
 — キャンセル後もロールバックが走ること、補償のアクティビティ ID が履歴にこの順で
-現れること、検索属性が書かれること — は `specs/` の仕様にする。さもないと、
+現れること、検索属性が書かれること — は `docs/specs/` の仕様にする。さもないと、
 振る舞いが壊れていてもテストは通る。それ以外は `saga/` に置く。ミリ秒で回る。
 
 仕様は実行される散文なので、シナリオは**運用者が説明する言葉**で書き、Temporal の
