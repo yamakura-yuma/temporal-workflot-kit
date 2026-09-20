@@ -33,20 +33,29 @@ run +args:
 build:
     {{dev}} go build ./...
 
-# Run go vet over every package, including the tagged integration tests.
+# Run go vet over every package.
 vet:
-    {{dev}} go vet -tags=integration ./...
+    {{dev}} go vet ./...
 
 # Unit tests: the saga package against the in-memory test environment.
 # Extra args go to `go test`, e.g. `just test -run TestBudget -v`.
 test *args:
     {{dev}} go test ./... {{args}}
 
-# Slower than `just test`, and the only place cancellation and search
-# attributes can actually be checked.
-# The library against a real Temporal dev server, started in-process by the test.
-test-integration *args:
-    {{dev}} go test -tags=integration -count=1 ./integration/ {{args}}
+# Slower than `just test`, and the only place cancellation and search attributes
+# can actually be checked.
+# Run the executable specifications under specs/, against a real dev server.
+spec *args:
+    {{dev}} gauge run specs {{args}}
+
+# Check every step in specs/ has an implementation, without running anything.
+spec-validate:
+    {{dev}} gauge validate specs
+
+# Show which Go function implements each step, since the only link between a
+# line in specs/ and the code is the step text.
+spec-steps:
+    {{dev}} grep -rn '^var _ = gauge.Step("' stepImpl/ | sed -E 's/:var _ = gauge\.Step\("/  ->  /; s/".*$//'
 
 # Format the tree in place.
 fmt:
@@ -61,7 +70,7 @@ tidy:
     {{dev}} go mod tidy
 
 # Everything that must pass before a change ships.
-ci: fmt-check vet build test test-integration
+ci: fmt-check vet build test spec-validate spec
 
 # --- agent config ------------------------------------------------------------
 

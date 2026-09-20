@@ -14,9 +14,15 @@ easy to get wrong.
 - `saga/` — the library. `Run` owns the rollback, `Step` runs one forward
   activity and registers its compensation. Unit tests run against Temporal's
   in-memory test environment
-- `integration/` — an example saga (reserve, charge, ship) exercised against a
-  real Temporal dev server the tests start in-process. Build-tagged
-  `integration`; also the worked example of the activity contract
+- `specs/` — executable specifications in Gauge's markdown, written in
+  Japanese. Run against a real Temporal dev server the suite starts in-process.
+  The only link to the code is the step text, matched against the string in
+  `gauge.Step(...)`
+- `stepImpl/` — the Go implementations of the steps those specifications are
+  written in, plus the suite hooks that start the server and worker
+- `example/order/` — the saga the specifications drive (reserve, charge, ship).
+  Also the worked example of the activity contract. A normal package, because
+  Gauge builds the module rather than a test binary
 
 There is no application here and nothing under `internal/`: this repo is a
 library, and a library under `internal/` cannot be imported from outside the
@@ -31,9 +37,11 @@ Development happens inside the container built from `Dockerfile` (Go +
 
 - `just` — list every recipe
 - `just build` / `just vet` / `just test` — Go build, vet, unit tests
-- `just test-integration` — the library against a real Temporal dev server,
-  started in-process by the test
-- `just ci` — fmt-check, vet, build, both suites; run before shipping a change
+- `just spec` — run the specifications in `specs/` against a real dev server
+- `just spec-validate` — check every step has an implementation, without running
+- `just spec-steps` — which Go function implements each step
+- `just ci` — fmt-check, vet, build, unit tests, spec-validate, spec; run before
+  shipping a change
 - `just shell` — interactive shell in the dev container
 
 ## Skills

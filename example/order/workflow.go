@@ -1,6 +1,4 @@
-//go:build integration
-
-package integration
+package order
 
 import (
 	"time"

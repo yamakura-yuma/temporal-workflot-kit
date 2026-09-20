@@ -13,5 +13,10 @@
 apm_modules/
 .claude/
 
+# Gauge run output
+/reports/
+/logs/
+/.gauge/
+
 # Graphify local knowledge graph (machine-local, rebuilds via `graphify update .`)
 graphify-out/

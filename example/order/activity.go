@@ -1,6 +1,4 @@
-//go:build integration
-
-package integration
+package order
 
 import (
 	"context"
@@ -52,22 +50,21 @@ type (
 	}
 )
 
-// Activities is the worked example of the contract the saga package puts on
-// activities: claim the idempotency key atomically before doing any work, and
-// succeed when a compensation finds nothing to undo.
-//
-// The ledger is in memory, which is only honest for a test. Its shape is not:
-// a real one needs the same atomicity from its store -- a unique constraint,
+// Ledger is the store the activities claim their idempotency keys in. It is in
+// memory, which is only honest for an example. Its shape is not: a real one
+// needs the same atomicity from its storage -- a unique constraint,
 // INSERT ... ON CONFLICT, or the downstream API's own idempotency-key header.
-type Activities struct {
+//
+// It is a type of its own rather than fields on Activities because a worker
+// registers every exported method of the struct it is given as an activity, so
+// a query method there would be rejected as a malformed activity.
+type Ledger struct {
 	mu     sync.Mutex
 	claims map[string]string // idempotency key -> the id handed out for it
 }
 
-// NewActivities returns an Activities with an empty ledger.
-func NewActivities() *Activities {
-	return &Activities{claims: map[string]string{}}
-}
+// NewLedger returns an empty Ledger.
+func NewLedger() *Ledger { return &Ledger{claims: map[string]string{}} }
 
 // claim records that key has been acted on and returns the id assigned to it.
 // The second result reports whether this call is the one that did the work; a
@@ -77,35 +74,50 @@ func NewActivities() *Activities {
 // the key was used and then acting on it is not equivalent: two attempts of the
 // same activity can be in flight at once after a timeout, and both would see
 // the key as unused.
-func (a *Activities) claim(key, id string) (string, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if existing, ok := a.claims[key]; ok {
+func (l *Ledger) claim(key, id string) (string, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if existing, ok := l.claims[key]; ok {
 		return existing, false
 	}
-	a.claims[key] = id
+	l.claims[key] = id
 	return id, true
 }
 
 // release removes a claim, reporting whether there was one to remove.
-func (a *Activities) release(key string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, ok := a.claims[key]; !ok {
+func (l *Ledger) release(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, ok := l.claims[key]; !ok {
 		return false
 	}
-	delete(a.claims, key)
+	delete(l.claims, key)
 	return true
 }
 
-// held reports whether a key is currently claimed. Tests use it to check that
-// a rollback actually undid everything.
-func (a *Activities) held(key string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	_, ok := a.claims[key]
+// Held reports whether a step of a given workflow run still holds its claim. A
+// specification uses it to check that a rollback actually undid everything.
+func (l *Ledger) Held(runID, step string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, ok := l.claims[runID+"/"+step]
 	return ok
 }
+
+// Activities is the worked example of the contract the saga package puts on
+// activities: claim the idempotency key atomically before doing any work, and
+// succeed when a compensation finds nothing to undo.
+type Activities struct {
+	ledger *Ledger
+}
+
+// NewActivities returns activities backed by the given ledger.
+func NewActivities(ledger *Ledger) *Activities {
+	return &Activities{ledger: ledger}
+}
+
+func (a *Activities) claim(key, id string) (string, bool) { return a.ledger.claim(key, id) }
+func (a *Activities) release(key string) bool             { return a.ledger.release(key) }
 
 func key(ctx context.Context, fallback string) string {
 	if k, ok := saga.IdempotencyKey(ctx); ok {
