@@ -3,16 +3,16 @@
 `example/` の各パッケージは、1つのテーマにつき1つ。どれも `docs/specs/` の仕様から実際に
 動かしているので、ここに書いてあることは全部動きます。
 
-**5つのワークフローを図で並べたものが [workflows.html](workflows.html) にあります。**
-正常系と失敗時の経路、補償がどの順で走るかを見るならそちらが早いです。
+各 example には `diagram.html` が置いてあります。正常系と失敗時の経路、補償がどの順で
+走るかを見るならそちらが早いです。
 
-| 知りたいこと | 答え | 実物 |
-| --- | --- | --- |
-| ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildStep` でステップになる | [`example/childflow/`](../example/childflow/) |
-| アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) |
-| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) |
-| signal を挟むには | `workflow.Selector` で待つ。分岐の前に `s.Err()` を見る | [`example/approval/`](../example/approval/) |
-| 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) |
+| 知りたいこと | 答え | 実物 | 図 |
+| --- | --- | --- | --- |
+| ステップはアクティビティに限るのか | 限らない。子ワークフローも `ChildStep` でステップになる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
+| アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
+| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
+| signal を挟むには | `workflow.Selector` で待つ。分岐の前に `s.Err()` を見る | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
+| 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
 ---
 

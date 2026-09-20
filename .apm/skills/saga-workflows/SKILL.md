@@ -22,7 +22,7 @@ description: >-
 | `docs/` | ドキュメント。`design.md`、`patterns.md`、`activity-contract.md`、`development.md`。 |
 | `docs/specs/` | Gauge の markdown で書かれた実行される仕様。日本語。スイートが起動する実際の dev server に対して実行する。場所は `env/default/default.properties` の `gauge_specs_dir` が決める。 |
 | `stepImpl/` | そのステップの Go 実装と、サーバとワーカーを起動するスイートフック。 |
-| `example/*/` | 仕様が動かす saga。**1テーマ1 example**。通常パッケージに置く — Gauge はテストバイナリではなくモジュールをビルドするので、`_test.go` には置けない。 |
+| `example/*/` | 仕様が動かす saga。**1テーマ1 example**で、それぞれ `diagram.html` を持つ。通常パッケージに置く — Gauge はテストバイナリではなくモジュールをビルドするので、`_test.go` には置けない。 |
 
 `internal/` には何も置かない。手で動かすアプリケーションも無い。`internal/` の
 ライブラリはモジュールの外から import できないし、かつての worker / starter

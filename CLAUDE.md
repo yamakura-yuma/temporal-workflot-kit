@@ -13,9 +13,8 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 - `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ
   実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
 - `docs/` — ドキュメント。`design.md`（なぜこの形か）、`patterns.md`（よくある形と
-  example への索引）、`workflows.html`（5つの example を図解したもの）、
-  `activity-contract.md`（アクティビティ側の契約と、塞げていないこと）、
-  `development.md`（開発手順）
+  example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
+  こと）、`development.md`（開発手順）
 - `docs/specs/` — Gauge の markdown で書かれた実行される仕様。日本語。スイートが
   プロセス内に起動する実際の Temporal dev server に対して実行する。コードとの
   対応づけはステップ文が `gauge.Step(...)` の文字列と一致することだけ。場所は
@@ -31,7 +30,7 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
 - `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例
 - `example/childflow/` — ステップが子ワークフローの例（`saga.ChildStep`）
 
-example は1テーマ1個。増やすときもこの単位を守る。
+example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。
 
 ここにアプリケーションは無く、`internal/` も無い。このリポジトリはライブラリであり、
 `internal/` に置いたライブラリはモジュールの外から import できないため。

@@ -114,16 +114,18 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 
 1テーマにつき1つ。どれも `docs/specs/` の仕様から実際に動かしています。
 
-| 例 | 何を見せているか |
-| --- | --- |
-| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを claim するアクティビティの書き方 |
-| [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか |
-| [`example/state/`](example/state/) | 入力が多い saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ |
-| [`example/childflow/`](example/childflow/) | ステップが子ワークフロー。アクティビティと混在しても1つの逆順で巻き戻る |
-| [`example/approval/`](example/approval/) | ステップの間で signal を待つ。分岐の前に `s.Err()` を見る理由も |
+それぞれに `diagram.html` を置いてあります。正常系と失敗時にどの順で何が走るかは、
+そちらをブラウザで開くのが早いです。
 
-形ごとの書き方は [docs/patterns.md](docs/patterns.md)、**5つを図で並べたものは
-[docs/workflows.html](docs/workflows.html)**（ブラウザで開いてください）。
+| 例 | 何を見せているか | 図 |
+| --- | --- | --- |
+| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを claim するアクティビティの書き方 | [図](example/order/diagram.html) |
+| [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/pipeline/diagram.html) |
+| [`example/state/`](example/state/) | 入力が多い saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ | [図](example/state/diagram.html) |
+| [`example/childflow/`](example/childflow/) | ステップが子ワークフロー。アクティビティと混在しても1つの逆順で巻き戻る | [図](example/childflow/diagram.html) |
+| [`example/approval/`](example/approval/) | ステップの間で signal を待つ。分岐の前に `s.Err()` を見る理由も | [図](example/approval/diagram.html) |
+
+形ごとの書き方は [docs/patterns.md](docs/patterns.md) に。
 
 ## API・設定
 
