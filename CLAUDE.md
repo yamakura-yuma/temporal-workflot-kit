@@ -1,72 +1,75 @@
 # temporal-saga
 
-A Go library for the Saga pattern on Temporal: a sequence of activities that
-can be rolled back, with the rollback wired up correctly for the cases that are
-easy to get wrong.
+Temporal 上で Saga パターンを実装するための Go ライブラリ。ロールバックできる
+アクティビティの列を書くためのもので、間違えやすいところを先に配線してある。
 
-## Stack
+## 構成技術
 
-- Go (module `github.com/yamakura-yuma/temporal-saga`)
-- Temporal Go SDK (`go.temporal.io/sdk`)
+- Go（モジュール `github.com/yamakura-yuma/temporal-saga`）
+- Temporal Go SDK（`go.temporal.io/sdk`）
 
-## Layout
+## レイアウト
 
-- `saga/` — the library. `Run` owns the rollback, `Step` runs one forward
-  activity and registers its compensation. Unit tests run against Temporal's
-  in-memory test environment
-- `specs/` — executable specifications in Gauge's markdown, written in
-  Japanese. Run against a real Temporal dev server the suite starts in-process.
-  The only link to the code is the step text, matched against the string in
-  `gauge.Step(...)`
-- `stepImpl/` — the Go implementations of the steps those specifications are
-  written in, plus the suite hooks that start the server and worker
-- `example/order/` — the saga the specifications drive (reserve, charge, ship).
-  Also the worked example of the activity contract. A normal package, because
-  Gauge builds the module rather than a test binary
+- `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ
+  実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
+- `specs/` — Gauge の markdown で書かれた実行される仕様。日本語。スイートが
+  プロセス内に起動する実際の Temporal dev server に対して実行する。コードとの
+  対応づけはステップ文が `gauge.Step(...)` の文字列と一致することだけ
+- `stepImpl/` — そのステップの Go 実装と、サーバとワーカーを起動するスイートフック
+- `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
+  契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
+  通常パッケージに置く
 
-There is no application here and nothing under `internal/`: this repo is a
-library, and a library under `internal/` cannot be imported from outside the
-module.
+ここにアプリケーションは無く、`internal/` も無い。このリポジトリはライブラリであり、
+`internal/` に置いたライブラリはモジュールの外から import できないため。
 
 ## Commands
 
-Development happens inside the container built from `Dockerfile` (Go +
-`temporal-cli` via Nix, pinned by `flake.nix`), driven from the host with
-`just`. No host-level Go install is needed; the repo is bind-mounted into
-`/workspace`, so edits are picked up without rebuilding.
+開発は `Dockerfile` から作られるコンテナ（Nix で固定した Go + `temporal-cli`、
+`flake.nix` 参照）の中で行い、ホストからは `just` で駆動する。ホスト側に Go を
+入れる必要はない。リポジトリは `/workspace` に bind mount されるので、編集は
+リビルド無しで反映される。
 
-- `just` — list every recipe
-- `just build` / `just vet` / `just test` — Go build, vet, unit tests
-- `just spec` — run the specifications in `specs/` against a real dev server
-- `just spec-validate` — check every step has an implementation, without running
-- `just spec-steps` — which Go function implements each step
-- `just ci` — fmt-check, vet, build, unit tests, spec-validate, spec; run before
-  shipping a change
-- `just shell` — interactive shell in the dev container
+- `just` — レシピ一覧
+- `just build` / `just vet` / `just test` — Go のビルド、vet、ユニットテスト
+- `just spec` — `specs/` の仕様を実際の dev server に対して実行
+- `just spec-validate` — 全ステップに実装があるかを、実行せずに確認
+- `just spec-steps` — どの Go 関数がどのステップを実装しているかの対応表
+- `just ci` — fmt-check, vet, build, ユニットテスト, spec-validate, spec。変更を
+  出す前に通す
+- `just shell` — dev コンテナの対話シェル
 
-## Skills
+## スキル
 
-Agent config comes from two places, both deployed into `./.claude/` by
-`just apm-install` (see `apm.yml`):
+エージェント設定は2箇所から来る。どちらも `just apm-install` が `./.claude/` に
+展開する（`apm.yml` 参照）。
 
-- `.apm/` — this project's own knowledge. The `saga-workflows` skill covers how
-  a saga step and its compensation are built here, plus the determinism,
-  idempotency and retry checklist a change has to pass. Edit and review this
-  directory; it is the only agent config this repo authors.
-- `core-principal` — the shared harness (rules, git guard hooks, `core-*`
-  skills) from the [dotfiles](https://github.com/yamakura-yuma/dotfiles) repo,
-  pinned by commit. Change it there and bump the `ref` here with `apm update`;
-  don't fork it locally.
+- `.apm/` — このプロジェクト固有の知識。`saga-workflows` スキルが、ここでの saga
+  ステップと補償の作り方、および変更が通すべき決定性・冪等性・リトライの
+  チェックリストを扱う。編集・レビュー対象はこのディレクトリで、このリポジトリが
+  自分で書いているエージェント設定はこれだけ。
+- `core-principal` — 共有ハーネス（ルール、git のガードフック、`core-*` スキル）。
+  [dotfiles](https://github.com/yamakura-yuma/dotfiles) リポジトリからコミットで
+  固定して取得する。変更は向こうで行い、ここでは `apm update` で `ref` を上げる。
+  ローカルでフォークしないこと。
 
-Anything that would read the same in another repo belongs in `core-principal`,
-not in `.apm/`. `.claude/` and `apm_modules/` are generated and gitignored.
+他のリポジトリでも同じに読めるものは `.apm/` ではなく `core-principal` に属する。
+`.claude/` と `apm_modules/` は生成物で gitignore してある。
 
 ## graphify
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+このプロジェクトには graphify-out/ に知識グラフがある（god ノード、コミュニティ
+構造、ファイル間の関係）。
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+規約:
+- コードベースについての質問は、graphify-out/graph.json があればまず
+  `graphify query "<質問>"` を実行する。関係を辿るなら `graphify path "<A>" "<B>"`、
+  特定の概念に絞るなら `graphify explain "<概念>"`。いずれも範囲を絞った部分グラフを
+  返すので、GRAPH_REPORT.md や生の grep 出力よりずっと小さい。
+- graphify-out/wiki/index.md があれば、生のソースを辿る代わりに全体の案内として使う。
+- graphify-out/GRAPH_REPORT.md を読むのは、アーキテクチャ全体を見直すときか、
+  query / path / explain で十分な文脈が出てこないときだけ。
+- コードを変更したら `graphify update .` を実行してグラフを最新に保つ
+  （AST のみ、API 費用なし）。
+
+この節は `graphify claude install` が生成したもの。再実行すると英語に戻ることがある。

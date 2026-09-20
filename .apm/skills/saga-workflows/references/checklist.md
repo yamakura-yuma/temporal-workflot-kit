@@ -1,39 +1,44 @@
-# Saga review checklist
+# saga レビューのチェックリスト
 
-## Workflow code (`internal/workflow/`)
+## ワークフローコード（`saga/`、`example/order/workflow.go`）
 
-- [ ] No direct calls to `time.Now()`, `time.Sleep()`, `rand`, goroutines, channels,
-      or network/filesystem I/O. Use `workflow.Now`, `workflow.NewTimer`,
-      `workflow.SideEffect`, `workflow.Go` instead.
-- [ ] No iteration over a Go map when the result affects workflow decisions —
-      map iteration order is non-deterministic. Sort keys first if needed.
-- [ ] Every `workflow.ExecuteActivity` call sets `ActivityOptions` with an
-      explicit `StartToCloseTimeout` (or `ScheduleToCloseTimeout`) and a
-      `RetryPolicy` — don't rely on SDK zero-values.
-- [ ] Workflow signature changes are backward compatible with in-flight
-      workflow histories, or the change is paired with a versioning strategy
-      (`workflow.GetVersion`) if behavior changes mid-flight.
-- [ ] Long-running workflows call `workflow.NewContinueAsNewError` before
-      history grows unbounded (large loops, polling).
-- [ ] Saga-style workflows define explicit compensation steps for every
-      forward step that has a side effect, and run compensations in reverse
-      order on failure.
+- [ ] `time.Now()`、`time.Sleep()`、`rand`、goroutine、channel、ネットワーク /
+      ファイルシステム I/O を直接呼んでいない。`workflow.Now`、`workflow.NewTimer`、
+      `workflow.SideEffect`、`workflow.Go` を使う。
+- [ ] ワークフローの判断に影響する箇所で Go の map を走査していない。map の走査順は
+      非決定的なので、必要ならキーをソートしてから回す。
+- [ ] `workflow.ExecuteActivity` を呼ぶ箇所はすべて、明示的な
+      `StartToCloseTimeout`（または `ScheduleToCloseTimeout`）と `RetryPolicy` を
+      持つ `ActivityOptions` を設定している。SDK のゼロ値に頼らない。
+- [ ] ワークフローのシグネチャ変更が実行中の履歴と後方互換である。途中で挙動が
+      変わるなら `workflow.GetVersion` によるバージョニングと対で入れる。
+- [ ] 長時間動くワークフローは、履歴が無制限に伸びる前に
+      `workflow.NewContinueAsNewError` を呼ぶ（大きなループ、ポーリング）。
+- [ ] 副作用のある forward ステップすべてに補償が定義され、失敗時は逆順で実行
+      される。
 
-## Activity code (`internal/activity/`)
+## アクティビティコード（`example/order/activity.go`）
 
-- [ ] Activities that cause an external side effect (write, charge, send) are
-      idempotent, or take/generate an idempotency key so an at-least-once
-      retry doesn't double-apply the effect.
-- [ ] Activities return typed errors (or use `temporal.NewApplicationError`)
-      so the workflow can distinguish retryable from terminal failures.
-- [ ] Activities respect `ctx` cancellation/deadline rather than running
-      unbounded.
-- [ ] Activity inputs/outputs are serializable (exported fields, no channels/
-      funcs/unexported-only structs).
+- [ ] 外部に副作用を起こすアクティビティ（書き込み、課金、送信）は冪等である。
+      または冪等キーを受け取る / 生成して、at-least-once のリトライで二重に
+      適用されないようにしている。
+- [ ] 冪等キーの claim が**原子的**である。使用済みか確認してから処理する形は不可。
+      タイムアウトで2つの試行が同時に走り、両方が「未使用」を見る。
+- [ ] 補償は、取り消すものが無いときに成功する（no-op で返す）。補償は forward の
+      実行前に登録されるため、起きなかったステップに対して呼ばれうる。
+- [ ] 型付きのエラーを返す（または `temporal.NewApplicationError` を使う）。
+      ワークフロー側がリトライ可能か終端かを区別できるようにする。
+- [ ] 無制限に走り続けず、`ctx` のキャンセルとデッドラインを尊重する。
+- [ ] 入出力がシリアライズ可能である（エクスポートされたフィールド、channel /
+      関数 / 非公開フィールドのみの構造体を含まない）。
 
-## Worker/registration (`cmd/worker`)
+## ワーカーへの登録（`stepImpl/suite.go`）
 
-- [ ] Every workflow and activity used by a started workflow is registered
-      on the worker before it's needed.
-- [ ] Task queue names are defined once (a shared constant) and reused by
-      worker and starter, not duplicated as string literals.
+- [ ] 開始されたワークフローが到達するワークフロー・アクティビティが、必要になる
+      前にすべてワーカーへ登録されている。未登録はコンパイル時ではなく実行時に
+      失敗する。
+- [ ] ワーカーに渡す構造体の**エクスポートされたメソッドはすべてアクティビティと
+      して登録される**。アクティビティでない問い合わせメソッドを同じ構造体に
+      生やさない（`Ledger` のように型を分ける）。
+- [ ] タスクキュー名は1箇所（共有の定数）で定義し、文字列リテラルを複数箇所に
+      書かない。

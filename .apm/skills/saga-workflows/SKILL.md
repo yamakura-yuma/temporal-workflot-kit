@@ -1,118 +1,109 @@
 ---
 name: saga-workflows
 description: >-
-  Use when working on the saga library in this repo — the saga/ package, the
-  specifications under specs/ and their steps in stepImpl/, the example saga in
-  example/order/, or any change to how a step and its compensation are wired. Covers the invariants the library depends on,
-  the contract it puts on activities, and the determinism, idempotency and
-  retry rules a change has to satisfy before it ships.
+  このリポジトリの saga ライブラリを触るときに使う — saga/ パッケージ、specs/ の
+  仕様とその実装 stepImpl/、example/order/ の例、あるいはステップと補償の配線を
+  変えるとき。ライブラリが依存している不変条件、アクティビティ側に課される契約、
+  変更を出す前に満たすべき決定性・冪等性・リトライの規則を扱う。
 ---
 
-# The saga library in this repo
+# このリポジトリの saga ライブラリ
 
-This repo publishes `saga`, a package for running a sequence of Temporal
-activities that can be rolled back. It is a library, not an application: the
-saga under `example/order/` exists to exercise it.
+このリポジトリは `saga` を公開している。ロールバックできる Temporal
+アクティビティの列を実行するためのパッケージ。アプリケーションではなくライブラリ
+であり、`example/order/` の saga はそれを動かすために存在する。
 
-## Where things live
+## どこに何があるか
 
 | | |
 | --- | --- |
-| `saga/` | The library. `Run` owns the rollback, `Step` runs one forward activity and registers its compensation. |
-| `saga/saga_test.go` | Unit tests against the in-memory test environment. |
-| `specs/` | Executable specifications in Gauge's markdown, written in Japanese, run against a real dev server the suite starts. |
-| `stepImpl/` | The Go implementations of those steps, and the suite hooks that start the server and worker. |
-| `example/order/` | The saga the specifications drive, and the worked example of the activity contract. A normal package: Gauge builds the module, not a test binary, so it cannot live in `_test.go`. |
+| `saga/` | ライブラリ本体。`Run` がロールバックを所有し、`Step` が forward を1つ実行して補償を登録する。 |
+| `saga/saga_test.go` | インメモリのテスト環境に対するユニットテスト。 |
+| `specs/` | Gauge の markdown で書かれた実行される仕様。日本語。スイートが起動する実際の dev server に対して実行する。 |
+| `stepImpl/` | そのステップの Go 実装と、サーバとワーカーを起動するスイートフック。 |
+| `example/order/` | 仕様が動かす saga であり、アクティビティ側の契約の実装例。通常パッケージに置く — Gauge はテストバイナリではなくモジュールをビルドするので、`_test.go` には置けない。 |
 
-Nothing belongs under `internal/`, and there is no application to run by hand:
-a library under `internal/` cannot be imported from outside this module, and
-what the old worker and starter binaries demonstrated is now asserted by the
-integration tests.
+`internal/` には何も置かない。手で動かすアプリケーションも無い。`internal/` の
+ライブラリはモジュールの外から import できないし、かつての worker / starter
+バイナリが示していたことは今は仕様が主張している。
 
-## Which suite a behaviour belongs in
+## どちらのスイートに書くか
 
-Temporal's in-memory test environment runs activities even on a canceled
-context and does not enforce activity timeouts. Anything that depends on either
--- the rollback surviving a cancel, the compensated activity IDs appearing in
-the history in order, a search attribute being written -- has to be a
-specification under `specs/`, or the test will pass while the behaviour is
-broken. Everything else belongs in `saga/`, where it runs in milliseconds.
+Temporal のインメモリのテスト環境は、**キャンセルされた context でもアクティビティを
+実行し、アクティビティのタイムアウトも課さない**。どちらかに依存する振る舞い
+— キャンセル後もロールバックが走ること、補償のアクティビティ ID が履歴にこの順で
+現れること、検索属性が書かれること — は `specs/` の仕様にする。さもないと、
+振る舞いが壊れていてもテストは通る。それ以外は `saga/` に置く。ミリ秒で回る。
 
-A specification is prose that executes, so write the scenario as the behaviour
-an operator would describe, and keep the Temporal vocabulary in `stepImpl/`.
-Specifications are written in Japanese; the step text and the string literal in
-`gauge.Step(...)` have to agree exactly, so both sides are Japanese even though
-the rest of the repo is English.
+仕様は実行される散文なので、シナリオは**運用者が説明する言葉**で書き、Temporal の
+語彙は `stepImpl/` に閉じ込める。仕様は日本語で書く。ステップ文と
+`gauge.Step(...)` の文字列リテラルは完全一致が必要なので、リポジトリの他が英語でも
+両側とも日本語になる。
 
-**That text is the only link between a specification and its code.** Nothing in
-the compiler checks it. To find what a line does, search `stepImpl/` for its
-text, or run `just spec-steps` for the whole pairing. `just spec-validate`,
-part of `just ci`, reports a step with no implementation, with its file and
-line, without starting a server.
+**仕様とコードの対応づけは、そのステップ文だけである。** コンパイラは何も確認
+しない。1行が何をするか調べるには `stepImpl/` をその文で検索するか、
+`just spec-steps` で対応表を出す。`just spec-validate`（`just ci` の一部）が、
+実装の無いステップを file:line 付きで、サーバを起動せずに報告する。
 
-## Invariants the library depends on
+## ライブラリが依存している不変条件
 
-Each of these exists because the obvious alternative is broken. Do not
-"simplify" one without reading the test that covers it.
+どれも「素直な代替案が壊れている」から存在する。それを覆うテストを読まずに
+「単純化」しないこと。
 
-- **Compensations run on a disconnected context.** A canceled workflow context
-  fails every later activity immediately, so compensation written the obvious
-  way does nothing in the one case it exists for.
-- **The compensation is registered before the forward activity runs**, not
-  after it succeeds. An activity that reports a timeout may still have taken
-  effect on a worker that never reported back.
-- **The idempotency key is `RunID + "/" + step name`.** Not `FirstRunID`: that
-  is preserved across ContinueAsNew, Retry, Cron and Reset, so a second run
-  would reuse the first run's keys and every step would look like one that had
-  already been applied. Not a positional counter either: inserting a step would
-  shift every key after it.
-- **The compensation's `ActivityID` carries a `:undo` suffix.** A duplicate
-  command ID panics the workflow task. `IdempotencyKey` strips it again so both
-  halves of a step observe the same key.
-- **`Run` fails the workflow when a step failed, even if the body returned
-  nil**, and discards the body's result. Otherwise one missing error check
-  completes a workflow whose side effects are half applied.
-- **Compensation failures are not joined with `errors.Join`.** Temporal's
-  failure converter is a type switch that follows a single `Unwrap() error`; a
-  joined error is recorded as type `joinError` with no cause, and
-  `NonRetryableErrorTypes` stops matching.
-- **The compensation budget is required**, because nothing outside can cancel a
-  disconnected context.
+- **補償は disconnected context で実行する。** キャンセルされたワークフローの
+  context は以降のアクティビティを即座に失敗させるので、素直に書いた補償は
+  それが最も必要な場面で何もしない。
+- **補償は forward アクティビティの実行前に登録する。** 成功した後ではない。
+  タイムアウトを報告したアクティビティは、結果を返せなかっただけでワーカー上では
+  完走しているかもしれない。
+- **冪等キーは `RunID + "/" + ステップ名`。** `FirstRunID` ではない。あれは
+  ContinueAsNew・Retry・Cron・Reset を跨いで保存されるので、2回目の run が1回目の
+  キーを再利用し、すべてのステップが「適用済み」に見える。連番でもない。ステップを
+  挿入すると以降のキーが全部ずれる。
+- **補償の `ActivityID` には `:undo` を付ける。** コマンド ID の重複はワークフロー
+  タスクを panic させる。`IdempotencyKey` がこれを剥がすので、ステップの両側は同じ
+  キーを見る。
+- **ステップが失敗していれば、body が nil を返しても `Run` はワークフローを失敗
+  させる。** body の戻り値は捨てる。さもないとエラーチェックを1つ忘れただけで、
+  副作用が半分だけ適用されたワークフローが完了扱いになる。
+- **補償の失敗を `errors.Join` で束ねない。** Temporal の failure コンバータは単一の
+  `Unwrap() error` を辿る型スイッチなので、join したエラーは型名 `joinError`、原因
+  チェーン無しで記録され、`NonRetryableErrorTypes` の照合も効かなくなる。
+- **補償の予算は必須。** disconnected context は外から誰もキャンセルできないため。
 
-## Adding a saga step
+## saga のステップを足す
 
-1. Write the forward activity and its compensation as methods on the same
-   struct, so they can share the ledger that makes them idempotent.
-2. The forward activity must **claim its idempotency key atomically** —
-   `INSERT ... ON CONFLICT`, a unique constraint, or the downstream API's own
-   idempotency-key header. Reading the key and then acting on it is not enough:
-   two attempts can be in flight at once after a timeout.
-3. The compensation must **succeed when it finds nothing to undo**.
-4. Call `saga.Step(ctx, s, "<name>", fwd, undo, in)` with a name unique within
-   the saga. The step error can be ignored in a linear saga; `Run` handles it.
-5. Register the activities on the worker. An activity the workflow reaches but
-   the worker never registered fails at run time, not compile time.
+1. forward アクティビティとその補償を、同じ構造体のメソッドとして書く。冪等性を
+   支える台帳を共有できるようにするため。
+2. forward アクティビティは**冪等キーを原子的に claim する**こと —
+   `INSERT ... ON CONFLICT`、一意制約、または下流 API 自身の idempotency-key
+   ヘッダ。キーを読んでから処理する形では足りない。タイムアウトで2つの試行が同時に
+   走りうる。
+3. 補償は**取り消すものが無いときに成功する**こと。
+4. `saga.Step(ctx, s, "<name>", fwd, undo, in)` を、saga 内で一意な名前で呼ぶ。
+   直線的な saga ならステップのエラーは無視してよい。`Run` が扱う。
+5. アクティビティをワーカーに登録する。ワークフローが到達するのに未登録のものは、
+   コンパイル時ではなく実行時に失敗する。
 
-## Before the change ships
+## 変更を出す前に
 
-Walk every changed file under `saga/`, `stepImpl/` or `example/` against
-`references/checklist.md`. The three failure classes that matter most:
+`saga/`、`stepImpl/`、`example/` の変更ファイルをすべて `references/checklist.md`
+に照らして確認する。とくに効く失敗の型は3つ。
 
-1. **Non-determinism in workflow code** — anything that can produce a
-   different result on replay (time, randomness, goroutines, map iteration,
-   direct I/O) breaks Temporal's replay model. Workflow code reaches these only
-   through the SDK's deterministic equivalents (`workflow.Now`,
-   `workflow.SideEffect`, `workflow.Go`, `workflow.NewTimer`).
-2. **Non-idempotent activities** — an activity that isn't safe to run twice is
-   a bug, not a style issue.
-3. **Missing or unbounded retry policy** — every `workflow.ActivityOptions`
-   needs an explicit `StartToCloseTimeout` and a considered `RetryPolicy`.
+1. **ワークフローコードの非決定性** — リプレイで違う結果になりうるもの（時刻、
+   乱数、goroutine、map の走査、直接 I/O）は Temporal のリプレイモデルを壊す。
+   ワークフローコードがこれらに触れてよいのは SDK の決定的な代替
+   （`workflow.Now`、`workflow.SideEffect`、`workflow.Go`、`workflow.NewTimer`）
+   経由のときだけ。
+2. **冪等でないアクティビティ** — 2回走っても安全でないアクティビティはスタイルの
+   問題ではなくバグ。
+3. **リトライポリシーの欠落・無制限** — `workflow.ActivityOptions` には明示的な
+   `StartToCloseTimeout` と、考えて決めた `RetryPolicy` が要る。
 
-Changing `saga/` changes the command sequence of every workflow that uses it,
-which breaks the replay of runs that are still open. Treat any edit that adds,
-removes or reorders a workflow command as a breaking change.
+`saga/` を変えると、それを使うすべてのワークフローのコマンド列が変わり、実行中の
+run のリプレイが壊れる。ワークフローコマンドを追加・削除・並べ替える変更は、
+破壊的変更として扱うこと。
 
-Run `just ci` (fmt-check, vet, build, unit tests, spec-validate and the
-specifications, all inside the dev container). `just spec` alone is the one to
-reach for when the change touches cancellation, activity IDs, or anything else
-the in-memory environment cannot show.
+`just ci`（fmt-check、vet、build、ユニットテスト、spec-validate、仕様。すべて dev
+コンテナの中）を実行する。キャンセル、アクティビティ ID、その他インメモリ環境が
+示せないものに触れる変更では、`just spec` 単体を先に回すとよい。
