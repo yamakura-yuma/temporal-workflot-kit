@@ -118,7 +118,7 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 func (w *fulfillment) reserve(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
-	w.reservation, _ = saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve, a.Unreserve), ReserveReq{
+	w.reservation, _ = saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{
 		Order:    w.in.ID,
 		SKU:      w.in.SKU,
 		Quantity: w.in.Quantity,
@@ -129,7 +129,7 @@ func (w *fulfillment) reserve(ctx workflow.Context, s *saga.Saga) {
 func (w *fulfillment) chargeCard(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
-	w.charge, _ = saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), ChargeReq{
+	w.charge, _ = saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{
 		Order:       w.in.ID,
 		Customer:    w.in.Customer,
 		Amount:      w.in.Amount,
@@ -143,7 +143,7 @@ func (w *fulfillment) chargeCard(ctx workflow.Context, s *saga.Saga) {
 func (w *fulfillment) ship(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
-	w.shipment, _ = saga.Step(ctx, s, "ship", saga.Activity(a.Ship, a.CancelShipment), ShipReq{
+	w.shipment, _ = saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{
 		Order:   w.in.ID,
 		Address: w.in.Address,
 		Charge:  w.charge,

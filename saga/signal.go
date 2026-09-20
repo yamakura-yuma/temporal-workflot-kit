@@ -25,7 +25,7 @@ import (
 //	    return decision, nil
 //	}
 //
-//	saga.Step(ctx, s, "approval", saga.Func(awaitApproval, nil), ApprovalReq{Wait: wait})
+//	saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
 //
 // Called directly in the body of a saga it will wait its full timeout even
 // after a step has failed, which is the reason to wrap it.

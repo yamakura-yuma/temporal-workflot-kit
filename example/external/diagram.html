@@ -120,7 +120,7 @@
   <strong>受け手の責任</strong>です。
 </div>
 
-<pre><code>saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease),
+<pre><code>saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease),
     HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
 
 // 2つとも普通のワークフローコード
@@ -137,8 +137,8 @@ func sendRelease(ctx workflow.Context, req HoldReq) error {
 <h2>3つ目の executor</h2>
 <table>
   <tr><th></th><th>実行</th><th>冪等キー</th><th>予算で切る対象</th></tr>
-  <tr><td><code>saga.Step</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
-  <tr><td><code>saga.ChildStep</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
+  <tr><td><code>saga.Activity</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
+  <tr><td><code>saga.ChildWorkflow</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
   <tr><td><code>saga.Func</code>（signal）</td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
 </table>
 

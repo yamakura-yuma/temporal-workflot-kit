@@ -85,7 +85,7 @@ dev server を起動して確かめます。
 | 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
 | 失敗の報告 | 補償が失敗したら、型付きのエラーと検索属性で残す。元のエラーは消さない |
 | 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
-| ステップの種類を選べる | アクティビティ / 子ワークフロー / 自分の関数。混ざっても1つの逆順で巻き戻る |
+| ステップの種類を選べる | アクティビティ / 子ワークフロー / 自分の関数。**forward と補償で別々に選べる**。混ざっても1つの逆順で巻き戻る |
 | 逃げ道 | `Add` で任意の取り消しを登録できる |
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
@@ -122,7 +122,7 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 | [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを claim するアクティビティの書き方 | [図](example/order/diagram.html) |
 | [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/pipeline/diagram.html) |
 | [`example/state/`](example/state/) | 入力が多い saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ | [図](example/state/diagram.html) |
-| [`example/childflow/`](example/childflow/) | ステップが子ワークフロー。アクティビティと混在しても1つの逆順で巻き戻る | [図](example/childflow/diagram.html) |
+| [`example/childflow/`](example/childflow/) | 子ワークフローで実行し、アクティビティで取り消すステップ。冪等キーは executor を跨いで同じ | [図](example/childflow/diagram.html) |
 | [`example/approval/`](example/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/approval/diagram.html) |
 | [`example/external/`](example/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/external/diagram.html) |
 

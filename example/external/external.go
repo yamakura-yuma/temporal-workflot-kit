@@ -94,10 +94,9 @@ func ExternalWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		// Sending a signal is a Func step: the library has no key to put on it
 		// and no timeout to clamp, so a constructor of its own would be this
 		// with extra vocabulary.
-		saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease),
-			HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+		saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
 
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), ChargeReq{Order: in.ID, Amount: in.Amount, Fail: in.FailAt == "charge"})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in.ID, Amount: in.Amount, Fail: in.FailAt == "charge"})
 
 		return Receipt{Charge: chg}, nil
 	})

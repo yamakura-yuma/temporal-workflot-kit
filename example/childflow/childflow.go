@@ -1,10 +1,10 @@
 // Package childflow is the example for a step that is a child workflow rather
 // than an activity.
 //
-// A saga can mix the two. Here the packing step is a child workflow because it
-// is long enough to deserve its own history, while reserving and shipping stay
-// activities. The rollback runs them in one reverse order regardless of which
-// kind each step was.
+// A saga can mix them, and so can a single step. Here packing is a child
+// workflow because it is long enough to deserve its own history, while undoing
+// it is one activity call, and reserving and shipping stay activities
+// throughout. The rollback runs them all in one reverse order.
 //
 // The child reads its idempotency key with saga.IdempotencyKeyOf, which is the
 // workflow-side twin of saga.IdempotencyKey. The key rides in the child's
@@ -68,13 +68,17 @@ func ChildflowWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve, a.Unreserve), ReserveReq{Order: in})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
 
-		// A child workflow step. Same shape as Step; the first argument of the
-		// two functions is a workflow.Context, which is what picks the executor.
-		pack, _ := saga.Step(ctx, s, "pack", saga.ChildWorkflow(PackWorkflow, UnpackWorkflow), PackReq{Order: in})
+		// The two halves run differently. Packing is long enough to deserve a
+		// child workflow of its own; undoing it is one activity call. Both
+		// still see the same idempotency key -- the child reads it with
+		// IdempotencyKeyOf, the activity with IdempotencyKey.
+		pack, _ := saga.Step(ctx, s, "pack",
+			saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack),
+			PackReq{Order: in})
 
-		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship, a.CancelShipment), ShipReq{Order: in, Pack: pack})
+		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in, Pack: pack})
 
 		return Receipt{Reservation: res, Pack: pack, Shipment: shp}, nil
 	})
@@ -93,20 +97,6 @@ func PackWorkflow(ctx workflow.Context, req PackReq) (string, error) {
 	var id string
 	err := workflow.ExecuteActivity(ctx, a.Pack, Note{Key: key, Order: req.Order.ID}).Get(ctx, &id)
 	return id, err
-}
-
-// UnpackWorkflow undoes PackWorkflow. It sees the same key the forward child
-// saw, so it can tell whether there is anything to undo.
-func UnpackWorkflow(ctx workflow.Context, req PackReq) error {
-	var a *Activities
-
-	key, _ := saga.IdempotencyKeyOf(ctx)
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 10 * time.Second,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-	})
-
-	return workflow.ExecuteActivity(ctx, a.Unpack, Note{Key: key, Order: req.Order.ID}).Get(ctx, nil)
 }
 
 // Note is what the packing children hand their activities.
@@ -216,14 +206,19 @@ func (a *Activities) Pack(ctx context.Context, note Note) (string, error) {
 }
 
 // Unpack undoes Pack, and succeeds when there is nothing packed.
-func (a *Activities) Unpack(ctx context.Context, note Note) error {
-	a.ledger.noteKey("unpack", note.Key)
+//
+// It is the compensation of a step whose forward half was a child workflow, and
+// it still reads the same key -- here with IdempotencyKey, because this is an
+// activity, where the child used IdempotencyKeyOf.
+func (a *Activities) Unpack(ctx context.Context, req PackReq) error {
+	k := key(ctx, "pack/"+req.Order.ID)
+	a.ledger.noteKey("unpack", k)
 
-	if !a.ledger.release(note.Key) {
-		logf(ctx, "unpack: nothing packed under key %s, nothing to do", note.Key)
+	if !a.ledger.release(k) {
+		logf(ctx, "unpack: nothing packed under key %s, nothing to do", k)
 		return nil
 	}
-	logf(ctx, "unpacked %s under key %s", note.Order, note.Key)
+	logf(ctx, "unpacked %s under key %s", req.Order.ID, k)
 	return nil
 }
 

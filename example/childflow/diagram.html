@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>childflow — ステップが子ワークフロー — temporal-saga example</title>
+<title>childflow — 子で実行し、アクティビティで取り消す — temporal-saga example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -77,8 +77,8 @@
 
 <nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="diagram.html" class="here">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>childflow — ステップが子ワークフロー<span class="path">example/childflow/</span></h1>
-<p>ステップはアクティビティに限りません。梱包だけを子ワークフローにして、取り消しも子ワークフローで行います。<strong>混在しても巻き戻しは1つの逆順</strong>です。</p>
+<h1>childflow — 子で実行し、アクティビティで取り消す<span class="path">example/childflow/</span></h1>
+<p>ステップはアクティビティに限りません。しかも forward と取り消しで別々に選べます。梱包は子ワークフロー、取り消しはアクティビティ1本。<strong>混在しても巻き戻しは1つの逆順</strong>です。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -98,11 +98,11 @@
     <div class="cell u">ship ✕<span class="sub2">アクティビティ</span></div>
   </div>
   <div class="fail-mark">▼ executor が違っても1つの逆順</div>
-  <div class="lane"><span class="tag">補償</span></div>
+  <div class="lane"><span class="tag">補償</span><span class="note">forward と別の executor でよい</span></div>
   <div class="row">
     <div class="cell u">reserve:undo</div>
     <div class="arr">←</div>
-    <div class="cell c">pack:undo<span class="sub2">UnpackWorkflow（子）</span></div>
+    <div class="cell u">pack:undo<span class="sub2">a.Unpack（アクティビティ）</span></div>
     <div class="arr">←</div>
     <div class="cell u">ship:undo</div>
   </div>
@@ -112,13 +112,13 @@
 <table>
   <tr><th></th><th>実行</th><th>冪等キーを載せる場所</th><th>予算で切る対象</th></tr>
   <tr>
-    <td><strong>アクティビティ</strong><br><code>saga.Step</code></td>
+    <td><strong>アクティビティ</strong><br><code>saga.Activity</code></td>
     <td><code>ExecuteActivity</code></td>
     <td><code>ActivityOptions.ActivityID</code></td>
     <td><code>ScheduleToCloseTimeout</code></td>
   </tr>
   <tr>
-    <td><strong>子ワークフロー</strong><br><code>saga.ChildStep</code></td>
+    <td><strong>子ワークフロー</strong><br><code>saga.ChildWorkflow</code></td>
     <td><code>ExecuteChildWorkflow</code></td>
     <td><code>ChildWorkflowOptions.WorkflowID</code></td>
     <td><code>WorkflowExecutionTimeout</code></td>
@@ -131,23 +131,26 @@
   </tr>
 </table>
 
-<p>
-  どちらを呼ぶかは<strong>第1引数の型が選びます</strong>。<code>context.Context</code> なら
-  アクティビティ、<code>workflow.Context</code> なら子ワークフロー。Temporal 自身の区別と
-  同じなので、名前ではなく型が教えてくれます。
-</p>
+<div class="note-box">
+  <strong>forward と補償は別々に選べます。</strong> 梱包は履歴を持つ価値があるので子
+  ワークフロー、取り消しはアクティビティ1本。<strong>実行の仕方が違っても両者は同じ
+  冪等キーを見ます</strong> — 子は <code>IdempotencyKeyOf</code> で
+  <code>WorkflowID</code> から、アクティビティは <code>IdempotencyKey</code> で
+  <code>ActivityID</code> から読み、<code>:undo</code> は剥がされた後なので同じ値です。
+</div>
 
 <pre><code>res,  _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-pack, _ := saga.ChildStep(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
-
-// 子の側は自分の鍵を読む。":undo" は剥がされているので forward と同じ値
-key, _ := saga.IdempotencyKeyOf(ctx)</code></pre>
+pack, _ := saga.Step(ctx, s, "pack",
+    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
+//  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   ~~~~~~~~~~~~~~~~~~~~~~~~~
+//  子ワークフローで実行し             アクティビティで取り消す</code></pre>
 
 <div class="spec"><b>## 子ワークフローのステップも逆順で取り消される</b>
 
 * 子ワークフローを含む注文 "mixed" を "ship" で失敗させる
 * saga は "no carrier available" で失敗する
-* 子ワークフロー "pack, pack:undo" が起動された
+* 子ワークフロー "pack" が起動された
+* ステップ "reserve, ship, ship:undo, pack:undo, reserve:undo" が実行された
 * 梱包と取り消しが見た冪等キーは一致する
 * 注文は "reserve, ship" を保持していない</div>
 

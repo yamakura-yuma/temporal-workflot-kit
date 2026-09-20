@@ -75,9 +75,11 @@ Temporal のインメモリのテスト環境は、**キャンセルされた co
   `Unwrap() error` を辿る型スイッチなので、join したエラーは型名 `joinError`、原因
   チェーン無しで記録され、`NonRetryableErrorTypes` の照合も効かなくなる。
 - **補償の予算は必須。** disconnected context は外から誰もキャンセルできないため。
-- **ステップを作る関数は `saga.Step` の1つだけ。** 何で実行するかは渡す値が決める
-  （`saga.Activity` / `saga.ChildWorkflow` / `saga.Func`）。executor ごとに違うのは3点
-  だけ（実行の呼び出し、鍵を載せる場所、予算で切る対象）。
+- **ステップを作る関数は `saga.Step` の1つだけ。** 何で実行するかは渡す値が決め、
+  forward と補償で別々に選べる（`saga.Activity` / `saga.ChildWorkflow` / `saga.Func`
+  と、対応する `saga.Undo*`）。補償が無ければ nil。
+- **冪等キーは executor を跨いで同じ。** 子ワークフローで実行してアクティビティで
+  取り消しても、`IdempotencyKeyOf` と `IdempotencyKey` は同じ値を返す。
 - **専用の値を足す基準は「鍵を載せるか、予算で切るか」。** どちらもしないものは
   `saga.Func` に語彙を足しただけなので足さない。外部への signal とローカル
   アクティビティがこれに当たる。

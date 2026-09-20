@@ -71,11 +71,11 @@ func PipelineWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve, a.Unreserve), ReserveReq{Order: in})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
 
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge, a.Refund), ChargeReq{Order: in, Reservation: res})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in, Reservation: res})
 
-		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship, a.CancelShipment), ShipReq{Order: in, Charge: chg})
+		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in, Charge: chg})
 
 		return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
 	})

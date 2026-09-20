@@ -104,7 +104,6 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	childflowWorker = worker.New(temporalClient, childflow.TaskQueue, worker.Options{})
 	childflowWorker.RegisterWorkflow(childflow.ChildflowWorkflow)
 	childflowWorker.RegisterWorkflow(childflow.PackWorkflow)
-	childflowWorker.RegisterWorkflow(childflow.UnpackWorkflow)
 	childflowWorker.RegisterActivity(childflow.NewActivities(childflowLedger))
 	if err := childflowWorker.Start(); err != nil {
 		fail("start the childflow worker: %v", err)
