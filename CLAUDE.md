@@ -16,23 +16,35 @@ A Go service built on the Temporal workflow engine, implementing the Saga patter
 
 ## Commands
 
-- Build: `go build ./...`
-- Vet: `go vet ./...`
-- Test: `go test ./...`
-- Run locally: start a Temporal dev server (`temporal server start-dev`), then
-  `go run ./cmd/worker` in one terminal and `go run ./cmd/starter` in another.
-- Alternatively, no host-level install needed: `docker compose up temporal worker`
-  starts the dev server and worker, then `docker compose run --rm starter` runs
-  a workflow. The image (`Dockerfile`) provides Go + `temporal-cli` via Nix
-  (`flake.nix`).
+Development happens inside the container built from `Dockerfile` (Go +
+`temporal-cli` via Nix, pinned by `flake.nix`), driven from the host with
+`just`. No host-level Go install is needed; the repo is bind-mounted into
+`/workspace`, so edits are picked up without rebuilding.
+
+- `just` — list every recipe
+- `just build` / `just vet` / `just test` — Go build, vet, test
+- `just ci` — fmt-check, vet, build, test; run before shipping a change
+- `just up` — start the Temporal dev server and the worker in the background;
+  `just starter` then runs one workflow, `just down` stops everything
+- `just shell` — interactive shell in the dev container
+- `just temporal <args>` — `temporal` CLI against the dev server
 
 ## Skills
 
-Conventions, review checklists, and process (Go/Temporal review rules, how to
-add or improve a skill, how to run a retrospective) live in skills under
-`.claude/skills/`, managed via [`apm`](https://microsoft.github.io/apm/) with
-sources in `.apm/skills/`. Extend a skill instead of adding procedural detail
-here — see the `skill-authoring` skill for the flow.
+Agent config comes from two places, both deployed into `./.claude/` by
+`just apm-install` (see `apm.yml`):
+
+- `.apm/` — this project's own knowledge. The `saga-workflows` skill covers how
+  a saga step and its compensation are built here, plus the determinism,
+  idempotency and retry checklist a change has to pass. Edit and review this
+  directory; it is the only agent config this repo authors.
+- `core-principal` — the shared harness (rules, git guard hooks, `core-*`
+  skills) from the [dotfiles](https://github.com/yamakura-yuma/dotfiles) repo,
+  pinned by commit. Change it there and bump the `ref` here with `apm update`;
+  don't fork it locally.
+
+Anything that would read the same in another repo belongs in `core-principal`,
+not in `.apm/`. `.claude/` and `apm_modules/` are generated and gitignored.
 
 ## graphify
 

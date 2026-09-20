@@ -9,8 +9,9 @@
 .idea/
 
 
-# APM dependencies
+# APM dependencies and the agent config it deploys (regenerate with `apm install`)
 apm_modules/
+.claude/
 
 # Graphify local knowledge graph (machine-local, rebuilds via `graphify update .`)
 graphify-out/

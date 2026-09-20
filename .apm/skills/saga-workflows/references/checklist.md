@@ -1,4 +1,4 @@
-# Go + Temporal review checklist
+# Saga review checklist
 
 ## Workflow code (`internal/workflow/`)
 
