@@ -122,7 +122,8 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 | [`example/childflow/`](example/childflow/) | ステップが子ワークフロー。アクティビティと混在しても1つの逆順で巻き戻る |
 | [`example/approval/`](example/approval/) | ステップの間で signal を待つ。分岐の前に `s.Err()` を見る理由も |
 
-形ごとの書き方は [docs/patterns.md](docs/patterns.md) にまとめてあります。
+形ごとの書き方は [docs/patterns.md](docs/patterns.md)、**5つを図で並べたものは
+[docs/workflows.html](docs/workflows.html)**（ブラウザで開いてください）。
 
 ## API・設定
 
