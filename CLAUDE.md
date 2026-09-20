@@ -1,6 +1,8 @@
 # temporal-saga
 
-A Go service built on the Temporal workflow engine, implementing the Saga pattern.
+A Go library for the Saga pattern on Temporal: a sequence of activities that
+can be rolled back, with the rollback wired up correctly for the cases that are
+easy to get wrong.
 
 ## Stack
 
@@ -9,10 +11,15 @@ A Go service built on the Temporal workflow engine, implementing the Saga patter
 
 ## Layout
 
-- `cmd/worker/` — worker entrypoint (registers workflows/activities, polls a task queue)
-- `cmd/starter/` — starts a workflow execution
-- `internal/workflow/` — workflow definitions
-- `internal/activity/` — activity definitions
+- `saga/` — the library. `Run` owns the rollback, `Step` runs one forward
+  activity and registers its compensation
+- `example/order/` — an example saga (reserve, charge, ship) with compensations
+- `example/worker/` — worker entrypoint (registers the workflow and activities,
+  polls a task queue)
+- `example/starter/` — starts a workflow execution; `-fail=<step>` forces a rollback
+
+Nothing lives under `internal/`: a library there cannot be imported from outside
+the module.
 
 ## Commands
 
@@ -25,7 +32,8 @@ Development happens inside the container built from `Dockerfile` (Go +
 - `just build` / `just vet` / `just test` — Go build, vet, test
 - `just ci` — fmt-check, vet, build, test; run before shipping a change
 - `just up` — start the Temporal dev server and the worker in the background;
-  `just starter` then runs one workflow, `just down` stops everything
+  `just starter` then runs one workflow (`just starter --fail=charge` to watch a
+  rollback), `just down` stops everything
 - `just shell` — interactive shell in the dev container
 - `just temporal <args>` — `temporal` CLI against the dev server
 

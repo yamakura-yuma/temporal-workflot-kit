@@ -22,13 +22,13 @@ services:
 
   worker:
     <<: *dev
-    command: ["go", "run", "./cmd/worker"]
+    command: ["go", "run", "./example/worker"]
     depends_on:
       - temporal
 
   starter:
     <<: *dev
-    command: ["go", "run", "./cmd/starter"]
+    command: ["go", "run", "./example/starter"]
     depends_on:
       - temporal
     profiles:

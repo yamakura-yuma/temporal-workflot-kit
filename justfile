@@ -74,9 +74,10 @@ down:
 logs *args:
     docker compose logs -f {{args}}
 
-# Start one workflow execution against the running dev server.
-starter:
-    docker compose run --rm starter
+# Start one workflow execution against the running dev server. Extra args go to
+# the starter, e.g. `just starter --fail=charge` to watch the rollback.
+starter *args:
+    docker compose run --rm starter go run ./example/starter {{args}}
 
 # `temporal` CLI against the dev server, e.g. `just temporal workflow list`.
 temporal +args:

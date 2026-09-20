@@ -7,8 +7,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
-	"github.com/yamakura-yuma/temporal-saga/internal/activity"
-	"github.com/yamakura-yuma/temporal-saga/internal/workflow"
+	"github.com/yamakura-yuma/temporal-saga/example/order"
 )
 
 func main() {
@@ -23,9 +22,10 @@ func main() {
 	}
 	defer c.Close()
 
-	w := worker.New(c, workflow.TaskQueue, worker.Options{})
-	w.RegisterWorkflow(workflow.SagaWorkflow)
-	w.RegisterActivity(activity.Greet)
+	w := worker.New(c, order.TaskQueue, worker.Options{})
+	w.RegisterWorkflow(order.OrderWorkflow)
+	// One instance, so every activity shares the same ledger.
+	w.RegisterActivity(order.NewActivities())
 
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatalf("worker stopped: %v", err)
