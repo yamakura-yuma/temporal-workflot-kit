@@ -56,6 +56,12 @@ stepImpl/steps.go
 仕様は実行される散文なので、シナリオは**運用者が説明する言葉**で書き、Temporal の
 語彙は `stepImpl/` に閉じ込める。
 
+ステップ実装を `stepImpl/` に置くのは Gauge の既定だからで、このリポジトリの発明では
+ない（gauge-go の `constants/gauge.go` の `DefaultStepImplDir`。`gauge init go` が
+この名前で作る）。ランナーは `go build ./...` でモジュールの全パッケージを集めるので
+パッケージ名に依存しないが、他の Gauge プロジェクトと同じ読み方ができるよう既定の
+ままにする。詳しくは `docs/development.md`「置き場所」。
+
 仕様が動かす saga は `example/*/` にあり、**1テーマ1 example**。Gauge はテストバイナリ
 ではなくモジュールをビルドするので、`_test.go` には置けず通常パッケージに置く。
 example を増やすときは `diagram.html` も一緒に置く。
