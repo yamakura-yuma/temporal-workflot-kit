@@ -278,9 +278,9 @@ run 1  charge で "run1/charge" を claim → 課金が立つ
 run 2  charge で "run2/charge" を claim → 未使用に見える → 二重課金
 ```
 
-WorkflowID 由来の鍵なら、鍵は `wf/charge` のまま変わりません。run 2 は前の試行の claim を
-見つけて skip します。逆に**補償が完走していれば claim は release 済み**なので、run 2 は
-普通に課金をやり直します。
+WorkflowID 由来の鍵なら、鍵は `wf/charge` のまま変わりません。run 2 は前の試行が残したもの
+（業務行、下流の記録、台帳の claim のどれか）を見つけて skip します。逆に**補償が完走して
+いればそれは消えている**ので、run 2 は普通に課金をやり直します。
 
 つまり WorkflowID 由来の鍵は、「**補償できた分はやり直す、できなかった分は触らない**」に
 自然に落ちます。retry を有効にするなら、こちらを選んでください。
@@ -289,9 +289,13 @@ WorkflowID 由来の鍵なら、鍵は `wf/charge` のまま変わりません�
 
 WorkflowID を鍵にするなら、**同じ WorkflowID で2本目の run が立つ条件**も一緒に決める必要が
 あります。`WorkflowIDReusePolicy` の既定は `AllowDuplicate` で、完了済みの WorkflowID なら
-新しい run を受け付けます。クライアントが同じ Request ID で API を叩き直したときに2本目が
-立てば、鍵は同じでも台帳の claim は既に release 済みなので、端から端までの重複排除が
-閉じません。`RejectDuplicate` にする、あるいは `WorkflowIDConflictPolicy` で走行中の扱いを
+新しい run を受け付けます。
+
+効いてくるのは、1本目が失敗して補償まで完走した後です。鍵は同じでも副作用は補償で消えて
+いるので、クライアントが同じ Request ID で API を叩き直して2本目が立つと、業務操作は
+やり直されます。「1回だけ」のつもりで送り直したのに2回実行された、という形になりうる。
+**ステップ単位の鍵が run を跨いで同じでも、業務操作を1回に閉じるのは鍵ではなく起動側の
+方針です。** `RejectDuplicate` にする、あるいは走行中の扱いを `WorkflowIDConflictPolicy` で
 決める、のどちらかが要ります。
 
 #### `KeyFunc` に載る制約
