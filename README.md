@@ -1,6 +1,7 @@
-# temporal-saga
+# temporal-workflow-kit
 
-Temporal で、取り消せるアクティビティの列を書くための Go ライブラリ。
+Temporal のワークフローを書くための Go の部品集。今のところ中身は `saga/` の1つで、
+取り消せるアクティビティの列を書くためのものです。
 
 在庫を押さえて、課金して、配送を手配する。途中で失敗したら、そこまでに起きたことを
 逆順で取り消す。その「取り消す」側を書くのが面倒で、しかも間違えやすい。そこを引き受け
@@ -97,7 +98,7 @@ dev server を起動して確かめます。
 ## インストール・セットアップ
 
 ```bash
-go get github.com/yamakura-yuma/temporal-saga/saga
+go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 ```
 
 必要なのは Go 1.26 以降と Temporal Go SDK v1.49 以降。サーバ側に特別な設定は要りません。

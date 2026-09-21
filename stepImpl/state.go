@@ -8,7 +8,7 @@ import (
 	"github.com/getgauge-contrib/gauge-go/gauge"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-saga/example/state"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
 )
 
 var _ = gauge.Step("状態を持つ注文 <id>", func(id string) {

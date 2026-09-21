@@ -10,7 +10,7 @@ import (
 	"github.com/getgauge-contrib/gauge-go/gauge"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-saga/example/external"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/external"
 )
 
 // keyInventory holds the inventory workflow's run for the scenario.

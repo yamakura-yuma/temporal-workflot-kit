@@ -14,7 +14,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 
-	"github.com/yamakura-yuma/temporal-saga/saga"
+	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
 // --- test activities ---------------------------------------------------------

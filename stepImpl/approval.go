@@ -12,8 +12,8 @@ import (
 	"github.com/getgauge-contrib/gauge-go/gauge"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-saga/example/approval"
-	"github.com/yamakura-yuma/temporal-saga/example/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/approval"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
 )
 
 var _ = gauge.Step("承認待ちの注文 <id>", func(id string) {

@@ -1,11 +1,14 @@
-# temporal-saga
+# temporal-workflow-kit
 
-Temporal 上で Saga パターンを実装するための Go ライブラリ。ロールバックできる
-アクティビティの列を書くためのもので、間違えやすいところを先に配線してある。
+Temporal のワークフローを書くための Go の部品集。今入っているのは `saga/` の1つだけで、
+ロールバックできるアクティビティの列を書くためのもの。間違えやすいところを先に配線してある。
+
+名前が `temporal-saga` でないのは、運用向けの繰り返しワークフローのように saga ではない
+部品が後から入っても嘘にならないようにするため。部品を足すときは `saga/` の横に並べる。
 
 ## 構成技術
 
-- Go（モジュール `github.com/yamakura-yuma/temporal-saga`）
+- Go（モジュール `github.com/yamakura-yuma/temporal-workflow-kit`）
 - Temporal Go SDK（`go.temporal.io/sdk`）
 
 ## レイアウト

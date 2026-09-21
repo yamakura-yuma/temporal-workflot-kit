@@ -6,7 +6,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"github.com/yamakura-yuma/temporal-saga/saga"
+	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
 // TaskQueue is shared between the test worker and the test client.

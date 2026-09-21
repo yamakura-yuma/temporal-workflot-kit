@@ -1,4 +1,4 @@
-module github.com/yamakura-yuma/temporal-saga
+module github.com/yamakura-yuma/temporal-workflow-kit
 
 go 1.26.0
 

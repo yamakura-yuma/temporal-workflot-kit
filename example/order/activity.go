@@ -7,7 +7,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 
-	"github.com/yamakura-yuma/temporal-saga/saga"
+	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
 // Order is the workflow input. The Fail* fields exist so a test can force a

@@ -1,6 +1,6 @@
-name: temporal-saga
+name: temporal-workflow-kit-skills
 version: 1.0.0
-description: Agent configuration for the temporal-saga project
+description: Agent configuration for the temporal-workflow-kit project
 author: yamakura-yuma
 
 # Which agent platforms to deploy to.

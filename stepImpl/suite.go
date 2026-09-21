@@ -21,12 +21,12 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 
-	"github.com/yamakura-yuma/temporal-saga/example/approval"
-	"github.com/yamakura-yuma/temporal-saga/example/childflow"
-	"github.com/yamakura-yuma/temporal-saga/example/external"
-	"github.com/yamakura-yuma/temporal-saga/example/order"
-	"github.com/yamakura-yuma/temporal-saga/example/pipeline"
-	"github.com/yamakura-yuma/temporal-saga/example/state"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/approval"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/external"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
 )
 
 // Suite-wide, because they are started once per run. Per-scenario state goes in

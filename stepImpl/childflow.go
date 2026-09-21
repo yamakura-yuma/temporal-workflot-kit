@@ -10,7 +10,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-saga/example/childflow"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
 )
 
 var _ = gauge.Step("子ワークフローを含む注文 <id>", func(id string) {

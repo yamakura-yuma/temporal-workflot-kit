@@ -33,8 +33,8 @@ import (
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/yamakura-yuma/temporal-saga/example/order"
-	"github.com/yamakura-yuma/temporal-saga/saga"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
 // Scenario store keys.

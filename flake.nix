@@ -1,5 +1,5 @@
 {
-  description = "temporal-saga dev environment (Go + Temporal CLI)";
+  description = "temporal-workflow-kit dev environment (Go + Temporal CLI)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

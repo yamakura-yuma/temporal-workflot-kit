@@ -8,7 +8,7 @@ import (
 	"github.com/getgauge-contrib/gauge-go/gauge"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-saga/example/pipeline"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
 )
 
 var _ = gauge.Step("連鎖する注文 <id>", func(id string) {

@@ -1,4 +1,4 @@
-# Development commands for temporal-saga.
+# Development commands for temporal-workflow-kit.
 #
 # Everything runs inside the container built from `Dockerfile` (Go +
 # temporal-cli, pinned by `flake.nix`), so the only host-level requirements are
