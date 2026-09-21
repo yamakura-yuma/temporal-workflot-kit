@@ -14,7 +14,7 @@ SDK を上げると落ちるので、そのときに各行を上流と確認し�
 
 | 事実 | 上流 | このリポジトリでの使い所 |
 | --- | --- | --- |
-| テスト環境はアクティビティに10分の既定タイムアウトを置くだけで、指定したタイムアウトを課さない | [`internal/internal_workflow_testsuite.go#L806-L810`](https://github.com/temporalio/sdk-go/blob/v1.49.0/internal/internal_workflow_testsuite.go#L806-L810) | `docs/development.md`「スイートが2つある理由」、`docs/specs/rollback.spec` |
+| テスト環境はアクティビティに10分の既定タイムアウトを置くだけで、指定したタイムアウトを課さない | [`internal/internal_workflow_testsuite.go#L806-L810`](https://github.com/temporalio/sdk-go/blob/v1.49.0/internal/internal_workflow_testsuite.go#L806-L810) | `docs/development.md`「スイートが2つある理由」、`docs/specs/rollback.feature` |
 | failure コンバータは `Unwrap() error` を1本だけ辿る型スイッチ。`errors.Join` の返す型はどの分岐にも当たらない | [`internal/failure_converter.go#L66-L87`](https://github.com/temporalio/sdk-go/blob/v1.49.0/internal/failure_converter.go#L66-L87) | `docs/design.md` 6、`saga/errors.go` |
 | `ExecuteActivity` は関数値を名前の文字列に解決してから検証するので、文字列経由では引数の個数も型も照合されない | [`internal/internal_activity.go#L220`](https://github.com/temporalio/sdk-go/blob/v1.49.0/internal/internal_activity.go#L220), [`#L266`](https://github.com/temporalio/sdk-go/blob/v1.49.0/internal/internal_activity.go#L266) | `docs/design.md` 5、`saga/step.go` の `Activity` |
 | 1つのワークフロー実行内でコマンド ID が重複すると `[TMPRL1100] adding duplicate command` で panic する | [`internal/internal_command_state_machine.go#L1082`](https://github.com/temporalio/sdk-go/blob/v1.49.0/internal/internal_command_state_machine.go#L1082) | `saga/saga.go` の `undoSuffix` |

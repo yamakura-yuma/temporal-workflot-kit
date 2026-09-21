@@ -60,7 +60,7 @@
 | --- | --- |
 | ワークフローコード | `saga/`、`example/*/` の `*Workflow` 関数 |
 | アクティビティコード | `example/order/activity.go`、各 example の `Ledger` と `Activities` |
-| ワーカーへの登録 | `stepImpl/suite.go` |
+| ワーカーへの登録 | `specsteps/suite_test.go` |
 
 補償そのものの規則（登録の順序、no-op で成功すること、逆順）は Temporal 一般では
 なくこのリポジトリの `saga/` パッケージの不変条件なので、`saga-package` スキルにある。

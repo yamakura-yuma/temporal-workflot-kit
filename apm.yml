@@ -14,7 +14,7 @@ targets:
 #
 #   ./.apm/        this project's own domain knowledge, split four ways by where
 #                  the knowledge comes from: saga-package (this saga/ package),
-#                  temporal-review (Temporal in general), gauge-specs (the
+#                  temporal-review (Temporal in general), godog-specs (the
 #                  executable spec suite) and upstream-docs (how to cite or
 #                  cache an upstream doc). The last two read the same in any
 #                  repo and carry no repo-specific paths in their bodies, so

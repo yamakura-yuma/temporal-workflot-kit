@@ -8,15 +8,9 @@
 .vscode/
 .idea/
 
-
 # APM dependencies and the agent config it deploys (regenerate with `apm install`)
 apm_modules/
 .claude/
-
-# Gauge run output
-/reports/
-/logs/
-/.gauge/
 
 # Graphify local knowledge graph (machine-local, rebuilds via `graphify update .`)
 graphify-out/

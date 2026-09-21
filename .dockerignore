@@ -3,9 +3,3 @@
 .codegraph/
 apm_modules/
 graphify-out/
-
-# Gauge run output. Root-owned from inside the container, so leaving it in the
-# build context makes `docker build` fail on the host.
-.gauge/
-reports/
-logs/
