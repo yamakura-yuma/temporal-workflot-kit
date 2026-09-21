@@ -17,8 +17,14 @@ trap 'rm -f "$tmp"' EXIT
 gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc)\(|\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|KeyFunc|CompensationBudget|RemainingBudget|AwaitSignal)\b|\bsaga\.Run\(|\bsaga\.Step\('
 
 grep -rnE "$gone" docs .apm README.md \
-  | grep -v '^docs/design\.md:' \
-  | grep -v '^docs/activity-contract\.md:' > "$tmp" || true
+  | grep -v '^docs/activity-contract\.md:' \
+  | grep -v '^docs/design\.md:' > "$tmp" || true
+
+# docs/design.md は「意図して手放したもの」の節で、消した API を名指しで説明している。
+# そこは腐りではなく履歴なので、見出しより上だけを見る。
+sed -n '1,/^# 意図して手放したもの/p' docs/design.md \
+  | grep -nE "$gone" \
+  | sed 's|^|docs/design.md:|' >> "$tmp" || true
 
 # saga/*.go のコメントも同じ腐り方をする。ここは prefix が付かないので別の綴りで見る。
 grep -rnE '\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|runUndo|stepID)\b' \
