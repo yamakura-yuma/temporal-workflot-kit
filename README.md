@@ -93,7 +93,8 @@ dev server を起動して確かめます。
 | 逃げ道 | `Add` で任意の取り消しを登録できる |
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
-コード付きで書いてあります。
+コード付きで書いてあります。Temporal が初めてなら、その前に登場人物を図で押さえる
+[docs/temporal-concepts.html](docs/temporal-concepts.html) を。
 
 ## インストール・セットアップ
 
