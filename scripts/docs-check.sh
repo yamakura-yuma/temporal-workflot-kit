@@ -29,9 +29,12 @@ sed -n '1,/^# 意図して手放したもの/p' docs/design.md \
 grep -rnE "$gone" saga example specsteps --include='*.go' --include='*.html' >> "$tmp" || true
 
 # 改名し損ねた Run。RunOrCompensate・RunID・WorkflowRun には当たらない。
+# docs/temporal-concepts.html は Temporal の概念としての Run（Run ID、Run の連鎖）を
+# 説明する文書なので、この検査の対象外。
 grep -rnE '\bRun\b' saga example specsteps docs README.md CLAUDE.md \
      --include='*.go' --include='*.md' --include='*.html' --include='*.feature' \
-  | grep -vE 'RunOrCompensate|RunID|WorkflowRun|\.Run\(|func Run|TestRun' >> "$tmp" || true
+  | grep -v '^docs/temporal-concepts\.html:' \
+  | grep -vE 'RunOrCompensate|RunID|WorkflowRun|Run ID|Run Id|Workflow Run|\.Run\(|func Run|TestRun' >> "$tmp" || true
 
 if [ -s "$tmp" ]; then
   echo "消した API がドキュメント・コメントに残っている。" >&2

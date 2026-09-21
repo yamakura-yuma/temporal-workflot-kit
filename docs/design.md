@@ -378,9 +378,75 @@ func packKey(ctx workflow.Context) string {
 }
 ```
 
-`FirstRunID` を使ってはいけません。ContinueAsNew・Retry・Cron・Reset を跨いで保存される
-ので、2回目の run が1回目のキーを再利用し、すべてのステップが「適用済み」に見えます
-（[sdk-notes.md](sdk-notes.md)）。連番も駄目です。ステップを挿入すると以降が全部ずれます。
+実物: [`example/workflow/childflow/workflow.go`](../example/workflow/childflow/workflow.go)
+
+### 土台: Temporal の想定は2層
+
+外したとはいえ、**何を作るべきか**は上流が決めています。重複の排除は2箇所で行う想定です。
+
+| | どこで弾くか | 道具 |
+| --- | --- | --- |
+| 層1 | ワークフローが立つ前。Temporal サーバ | WorkflowID と Workflow Id Reuse / Conflict Policy |
+| 層2 | アクティビティの中 | 冪等キー（RunID + ActivityID） |
+
+層1では WorkflowID が業務識別子として扱われます。公式は WorkflowID を "meant to be a
+business-process identifier"（注文番号や顧客番号のようなもの）と位置づけ、"Temporal
+guarantees at most one Workflow Execution with a given Workflow Id ... at any point in
+time" としています
+（[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
+
+層2では、鍵の作り方まで名指しされています。"You can use a combination of the Workflow Run
+ID and the Activity ID as an idempotency key" で、理由は "guaranteed to be consistent
+across retry attempts but unique across Workflow Executions"
+（[Activity definition](https://docs.temporal.io/activity-definition)）。
+
+**`RunID + ステップ名` は、この層2の推奨そのものです。** このライブラリが決めたことでは
+ありませんでした。だから外しても、利用者が作るべき値は変わりません。
+
+### 条件は1つ。鍵の粒度が業務操作の粒度と一致すること
+
+`RunID` でなく `WorkflowExecution.ID` を使うこともできます。判断の基準は1つで、
+**WorkflowID に何が入っているか**です。
+
+| WorkflowID に入っているもの | 業務操作との関係 | 鍵に使えるか |
+| --- | --- | --- |
+| API の Request ID（コールごとに一意） | ぴったり一致する | **使える。`RunID` より安全** |
+| 注文 ID（同じ注文に複数回ワークフローを起動しうる） | 粗い | 2回目以降が全ステップ skip する |
+| cron のワークフロー（WorkflowID がスケジュール単位） | 粗い | 2日目以降が全ステップ skip する |
+
+**粗い側に外れると、処理が黙って飛びます。** エラーは出ません。全ステップが「もう済んで
+いる」と判定され、何もせずに成功が返るだけです。
+
+`RunID` は必ず「1実行」の粒度なので、業務操作と**同じか、細かい側にしか外れません**。
+細かい側に外れても既定では害が出ません。Temporal のワークフローは既定では retry policy を
+持たない（`StartWorkflowOptions.RetryPolicy` は任意）ので run は1本しかないからです。
+
+逆に言うと、**workflow の retry・reset・continue-as-new を有効にすると、細かい側の外れが
+実害になります。** run が変わるたびに鍵が変わるので、補償が走らないまま retry した場合に
+二重実行が起きます。
+
+```
+run 1  charge で "run1/charge" を押さえる → 課金が立つ
+       ワーカーが落ちる。補償は走らない
+run 2  charge で "run2/charge" を押さえる → 未使用に見える → 二重課金
+```
+
+そこを塞ぐなら `WorkflowExecution.ID` に寄せます。ただし **`WorkflowIDReusePolicy` も
+セットで決めてください**。既定は `AllowDuplicate` で、完了済みの WorkflowID でも新しい run
+が立ちます（[sdk-notes.md](sdk-notes.md)）。
+
+`FirstRunID` は使わないでください。ContinueAsNew・Retry・Cron・Reset を跨いで保存される
+点は WorkflowID と同じですが、**値をサーバが決める**ので、意図したかどうかに関わらず2回目
+の run が1回目の鍵を再利用します。意図するなら `WorkflowExecution.ID` を明示してください。
+
+連番も駄目です。ステップを挿入すると以降が全部ずれます。
+
+### 二重送信を止めたいだけなら、層2まで下りる必要はない
+
+WorkflowID に API の Request ID を入れて Reuse / Conflict Policy を設定すれば、重複した
+リクエストは**ワークフローが立つ前に**サーバが弾きます。それが層1の仕事です。層2まで
+WorkflowID 由来にして初めて塞がるのは、**同じ WorkflowID の中で run が変わる場合**だけ
+です。
 
 ## アクティビティに名前を付けない
 

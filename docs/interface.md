@@ -72,30 +72,82 @@ func (a *Activities) Unreserve(ctx context.Context, req ReserveReq) error {
 - 破ったときに起きること: 正常な巻き戻しが `CompensationFailed` で報告され、運用が調べに来る
 - 検査: `docs/specs/rollback.feature`（ship が失敗しても `Unreserve` は成功する）
 
-### C2. forward は冪等キーを、実行と**同じ1操作で**押さえる
+### C2. 重複排除は**呼び先**に任せる。書き方は下流で3つに分かれる
 
 Temporal はアクティビティを既定でリトライします。タイムアウトで2つの試行が同時に飛ぶことも
-あります。
+あります。では誰が弾くのか。上流の答えははっきりしています。
+
+> These are enforced by the service you are calling from your Activity, not by the
+> Activity itself.
+>
+> — [Activity definition](https://docs.temporal.io/activity-definition)
+
+**アクティビティは鍵を渡すだけで、重複排除の記録を持つのは下流のサービスです。** だから
+書き方は、下流が何であるかで3つに分かれます。
+
+| | 副作用の行き先 | 鍵をどこに置くか | 別の台帳 |
+| --- | --- | --- | --- |
+| 場合1 | 自分の DB | 業務行の UNIQUE 列 | 要らない |
+| 場合2 | 冪等キーを受け取る外部 API | 下流が持つ | 要らない |
+| 場合3 | 冪等キーを受け取らない外部 API | 自分で用意した store | 要る |
+
+#### 場合1 — 自分の DB に書く（一番多い）
+
+在庫を押さえる、注文行を立てる、伝票を起こす。**冪等キーをその業務行の UNIQUE 列に
+します。**
 
 ```sql
--- 良い: 書くことと押さえることが1文
-INSERT INTO charges (idem_key, ...) VALUES ($1, ...)
+INSERT INTO reservations (id, order_id, idem_key) VALUES (?, ?, ?)
   ON CONFLICT (idem_key) DO NOTHING
   RETURNING id;
 ```
 
+この1文が、**仕事をすることと鍵を押さえることの両方を兼ねています。** 2回目は
+`ON CONFLICT` で弾かれ、既にある行の id が返ります。
+
+だから**別の台帳は要りません。行そのものが台帳です。** 後始末も要りません。書き込みと
+仕事が同じ1操作なので、失敗したときに鍵を戻す段取りがそもそも無く、**行が無いだけ**です。
+場合3のような「押さえたが仕事はしていない」という中途半端な状態が作れません。
+
+#### 場合2 — 外部 API が冪等キーを受け取る
+
+決済 API の `Idempotency-Key` ヘッダのように下流が自分で重複排除してくれるなら、
+**リクエストで受け取った鍵をそのまま渡すだけ**です。
+
 ```go
-// 駄目: 確認してから書く。2つの試行が両方「未使用」を見る
-if !exists(key) {
-    charge(...)          // ← ここで二重課金
+func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) {
+	return a.gateway.Charge(ctx, req.IdemKey, req.Amount)
 }
 ```
 
-**「確認してから実行」は冪等ではありません。** 一意制約か、下流 API の
-`Idempotency-Key` ヘッダを使ってください。
+持つ状態はありません。**ここでも別の台帳は要りません。**
+
+#### 場合3 — 外部 API が冪等キーを受け取らない（一番厄介）
+
+ここで初めて、**鍵を先に押さえてから呼び、失敗したら解放する**段取りが要ります。
+
+```go
+if !store.Claim(req.IdemKey) {   // 既に押さえてあれば、前の試行の結果を返す
+	return store.Result(req.IdemKey)
+}
+id, err := a.legacy.Charge(ctx, req.Amount)
+if err != nil {
+	store.Release(req.IdemKey)   // ← 場合1・2には無い後始末
+	return "", err
+}
+store.Save(req.IdemKey, id)
+```
+
+**押さえてから呼ぶまでの間に落ちると、押さえたまま残ります。** 逆に呼んでから押さえると
+二重実行が起きます。どちらに倒しても穴が残るのがこの場合で、G1 と G2 はここの話です。
+
+**「確認してから実行」は冪等ではありません。** 2つの試行が両方「未使用」を見ます。一意制約
+か、下流 API 自身の仕組みを使ってください。
 
 - 破ったときに起きること: リトライのたびに二重課金・二重出荷
 - ライブラリは助けません: 原子性は下流にしか作れません
+- `example/activity/` はどれでもありません。下流が無い fake なので、記録を持たない形に
+  してあります（同ディレクトリの冒頭コメント）
 
 ### C3. 冪等キーは、利用者が作って渡す
 

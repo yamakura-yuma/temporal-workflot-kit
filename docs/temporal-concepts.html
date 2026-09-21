@@ -90,7 +90,7 @@
   </defs>
 </svg>
 
-<nav><a href="../README.md">README</a> · <a class="here" href="temporal-concepts.html">temporal-concepts</a> · <a href="design.md">design.md</a> · <a href="activity-contract.md">activity-contract.md</a></nav>
+<nav><a href="../README.md">README</a> · <a class="here" href="temporal-concepts.html">temporal-concepts</a> · <a href="design.md">design.md</a> · <a href="interface.md">interface.md</a></nav>
 
 <h1>Temporal の登場人物<span class="path">docs/temporal-concepts.html</span></h1>
 <p>Temporal を初めて使う Go エンジニア向けに、<code>docs/design.md</code> を読む前の地図として7枚の図を並べました。文は最小限で、図に描いた事実は末尾の出典（Temporal 公式ドキュメント）で確認しています。各図の下の緑の欄が、その概念がこのリポジトリのどこに出てくるかです。</p>
@@ -333,7 +333,7 @@
   <text x="432" y="358" text-anchor="middle" class="xs">結果</text>
 </svg>
 </div>
-<div class="repo">このリポジトリでは: 判断は Workflow 側の <code>saga.Func</code> に、外部呼び出しは <code>saga.Activity</code> に置く — <code>saga/step.go</code>。Activity 側に求める冪等性の約束は <code>docs/activity-contract.md</code>。</div>
+<div class="repo">このリポジトリでは: 判断は Workflow 側の関数に、外部呼び出しは Activity に置く。ステップの両半分はただの <code>func(workflow.Context) error</code> で、どちらに置くかは関数の中身の違い — <code>saga/step.go</code>。境界の契約は <code>docs/interface.md</code>。</div>
 
 <!-- ============================================================ 4 -->
 <h2><span class="n">4</span>1つの Activity の一生</h2>
@@ -483,7 +483,7 @@
   <text x="16" y="452" class="s">Worker が落ちても別の Worker が同じ History から同じ状態を復元できる。これが「durable」の中身。</text>
 </svg>
 </div>
-<div class="repo">このリポジトリでは: 冪等キーが replay で同じ値になるよう <code>KeyFunc</code> は決定的でなければならず、既定は <code>RunID + "/" + name</code> — <code>saga/saga.go</code>。ステップの Activity と補償は同じ History の Event として残る。</div>
+<div class="repo">このリポジトリでは: 冪等キーは replay で同じ値にならなければならないので、ワークフローが決定的に導ける値（<code>RunID + "/" + ステップ名</code> など）を作ります — <code>example/workflow/childflow/</code>。ステップの Activity と補償は同じ History の Event として残る。</div>
 
 <!-- ============================================================ 6 -->
 <h2><span class="n">6</span>Workflow ID / Run ID / Activity ID</h2>
@@ -542,7 +542,7 @@
   <rect x="470" y="410" width="12" height="12" rx="3" class="ac"/><text x="488" y="421" class="xs">Activity の識別子（省略可）</text>
 </svg>
 </div>
-<div class="repo">このリポジトリでは: <b>Activity ID にこのライブラリが冪等キーを載せる</b> — <code>saga/step.go</code>。キーの既定が <code>RunID + "/" + name</code> なのは、Retry や ContinueAsNew で別 Run になったら別のキーにするため（<code>FirstRunID</code> は Run をまたいで同じなので使わない） — <code>saga/saga.go</code>。子ワークフローでは同じキーを Workflow ID に載せる — <code>saga/key.go</code>。</div>
+<div class="repo">このリポジトリでは: <b>冪等キーはライブラリが作りません。</b> ワークフローが <code>RunID + "/" + ステップ名</code> のような値を自分で作り、リクエストに入れて渡します（<code>FirstRunID</code> は Run をまたいで同じなので使わない）。上流が推奨する作り方と、粒度が業務操作と一致していなければならないという条件は — <code>docs/design.md</code>「冪等キーを作らない・渡さない」。実物は <code>example/workflow/childflow/</code>。</div>
 
 <!-- ============================================================ 7 -->
 <h2><span class="n">7</span>Signal / Query / Update と Child Workflow</h2>
@@ -615,10 +615,10 @@
   <text x="16" y="416" class="s">Signal は宛先の Worker が居なくても届き、History に残って Worker が次に Workflow Task を取ったとき処理される。Update は Worker の応答を待つ。</text>
 </svg>
 </div>
-<div class="repo">このリポジトリでは: signal 待ちを1ステップにする <code>saga.AwaitSignal</code> — <code>saga/signal.go</code>、<code>example/approval/</code>。子ワークフローをステップにする <code>saga.ChildWorkflow</code> — <code>example/childflow/</code>。Workflow から別の Workflow へ signal を送るステップ — <code>example/external/</code>（Query も <code>HeldQuery</code> として使う）。</div>
+<div class="repo">このリポジトリでは: signal 待ちを1ステップにする — <code>example/workflow/approval/</code>。子ワークフローをステップにする — <code>example/workflow/childflow/</code>。どちらも専用の構成子は無く、ステップの関数の中で <code>ExecuteChildWorkflow</code> や Selector を書くだけです。Workflow から別の Workflow へ signal を送るステップ — <code>example/workflow/external/</code>（Query も <code>HeldQuery</code> として使う）。</div>
 
 <footer>
-  <div>次に読むもの: <a href="design.md">docs/design.md</a>（なぜこの形か）→ <a href="activity-contract.md">docs/activity-contract.md</a>（Activity 側の約束）→ <a href="patterns.md">docs/patterns.md</a>（よくある形と example）</div>
+  <div>次に読むもの: <a href="design.md">docs/design.md</a>（なぜこの形か）→ <a href="interface.md">docs/interface.md</a>（境界の 側の約束）→ <a href="patterns.md">docs/patterns.md</a>（よくある形と example）</div>
   <h2 style="margin-top:28px">出典</h2>
   <p style="font-size:12.5px">図に描いた事実はすべて Temporal 公式ドキュメントで確認した（2026-09 時点）。Event 名と timeout 名は公式の表記のまま。</p>
   <ol>
