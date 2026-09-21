@@ -30,7 +30,7 @@ dependencies:
   apm:
   - git: https://github.com/yamakura-yuma/dotfiles.git
     path: core-principal
-    ref: 098176e47d93c136cbc9f7713abe559e75829a42
+    ref: fa39bcaf4d782a254166e8fda1b793d3af196cd7
     alias: core-principal
     targets:
     - claude
