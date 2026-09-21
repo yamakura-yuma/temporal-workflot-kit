@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pipeline — 前段の出力が次段の入力になる — temporal-workflow-kit example</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:#fbfbfa; --surface:#fff; --surface-2:#f4f4f2;
+    --ink:#1c1c1a; --ink-2:#57564f; --ink-3:#8a8880; --line:#e2e1dc;
+    --fwd:#2f5fa8; --fwd-bg:#eef2f9; --undo:#b4342a; --undo-bg:#fdf1ef;
+    --ok:#2f6e4f; --ok-bg:#eef5f0; --wait:#8a6a12; --wait-bg:#fbf5e6;
+    --child:#6b3fa0; --child-bg:#f3eefa;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16161a; --surface:#1e1e23; --surface-2:#26262c;
+      --ink:#ecEae6; --ink-2:#b3b1ab; --ink-3:#807e78; --line:#33333a;
+      --fwd:#8fb3ea; --fwd-bg:#1d2331; --undo:#f2837a; --undo-bg:#2b1d1c;
+      --ok:#7fc7a0; --ok-bg:#1b2621; --wait:#d8b25c; --wait-bg:#2a2418;
+      --child:#b79ae0; --child-bg:#241d2e; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); line-height:1.75; font-size:15px; }
+  .wrap { max-width:900px; margin:0 auto; padding:40px 20px 80px; }
+  nav { font-size:12.5px; color:var(--ink-3); margin-bottom:26px; font-family:var(--mono); }
+  nav a { color:var(--ink-3); text-decoration:none; padding:2px 6px; border-radius:4px; }
+  nav a:hover { background:var(--surface-2); color:var(--ink); }
+  nav a.here { background:var(--fwd-bg); color:var(--fwd); }
+  h1 { font-size:24px; margin:0 0 6px; letter-spacing:-.01em; }
+  h1 .path { display:block; font-family:var(--mono); font-size:13px; color:var(--ink-3); font-weight:400; margin-top:4px; }
+  h2 { font-size:14px; margin:30px 0 8px; color:var(--ink-3); letter-spacing:.04em; text-transform:uppercase; }
+  p { margin:10px 0; color:var(--ink-2); }
+  p strong, td strong { color:var(--ink); font-weight:600; }
+  code { font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:1px 5px; border-radius:4px; }
+  pre { font-family:var(--mono); font-size:12.5px; line-height:1.65; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:13px 15px; overflow-x:auto; margin:12px 0; color:var(--ink); }
+  pre code { background:none; padding:0; }
+  .strip { border:1px solid var(--line); border-radius:10px; background:var(--surface); padding:18px 16px; margin:16px 0; overflow-x:auto; }
+  .row { display:flex; align-items:stretch; min-width:min-content; }
+  .row + .row { margin-top:10px; }
+  .cell { flex:1 1 0; min-width:112px; border-radius:8px; padding:9px 10px; font-family:var(--mono); font-size:12.5px; text-align:center; border:1px solid transparent; line-height:1.45; }
+  .cell .sub2 { display:block; font-size:10.5px; color:var(--ink-3); margin-top:2px; }
+  .f { background:var(--fwd-bg); color:var(--fwd); border-color:color-mix(in srgb,var(--fwd) 28%,transparent); }
+  .u { background:var(--undo-bg); color:var(--undo); border-color:color-mix(in srgb,var(--undo) 28%,transparent); }
+  .w { background:var(--wait-bg); color:var(--wait); border-color:color-mix(in srgb,var(--wait) 32%,transparent); }
+  .c { background:var(--child-bg); color:var(--child); border-color:color-mix(in srgb,var(--child) 32%,transparent); }
+  .g { background:var(--ok-bg); color:var(--ok); border-color:color-mix(in srgb,var(--ok) 28%,transparent); }
+  .x { background:var(--surface-2); color:var(--ink-3); border-color:var(--line); border-style:dashed; }
+  .s { background:var(--surface-2); color:var(--ink-2); border-color:var(--line); }
+  .arr { flex:0 0 26px; display:flex; align-items:center; justify-content:center; color:var(--ink-3); font-size:14px; }
+  .arr.data { flex:0 0 96px; flex-direction:column; gap:1px; font-size:11px; }
+  .arr.data .val { font-family:var(--mono); font-size:10.5px; color:var(--fwd); }
+  .lane { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .tag { font-family:var(--mono); font-size:10.5px; letter-spacing:.04em; padding:1px 7px; border-radius:3px; border:1px solid var(--line); color:var(--ink-3); background:var(--surface-2); white-space:nowrap; }
+  .note { font-size:12px; color:var(--ink-3); }
+  .fail-mark { text-align:center; font-size:12px; color:var(--undo); margin:8px 0 2px; font-family:var(--mono); }
+  .fail-mark.q { color:var(--ink-3); }
+  .spec { background:var(--surface-2); border-left:3px solid var(--ok); border-radius:0 8px 8px 0; padding:12px 16px; margin:14px 0; font-family:var(--mono); font-size:12.5px; line-height:1.8; color:var(--ink-2); white-space:pre-wrap; }
+  .spec b { color:var(--ink); font-weight:600; }
+  .note-box { background:var(--fwd-bg); border:1px solid color-mix(in srgb,var(--fwd) 22%,transparent); border-radius:8px; padding:13px 16px; margin:16px 0; font-size:13.5px; color:var(--ink-2); }
+  .note-box strong { color:var(--ink); }
+  table { width:100%; border-collapse:collapse; margin:16px 0; font-size:13.5px; }
+  th, td { text-align:left; padding:8px 11px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-2); }
+  th { color:var(--ink-3); font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; font-weight:600; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 18px; margin:12px 0 0; font-size:12.5px; color:var(--ink-3); }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .sw { width:13px; height:13px; border-radius:3px; border:1px solid; }
+  footer { margin-top:56px; padding-top:20px; border-top:1px solid var(--line); color:var(--ink-3); font-size:12.5px; }
+  a { color:var(--fwd); }
+  @media (max-width:680px){ .arr.data{flex-basis:62px} .cell{min-width:94px;font-size:11.5px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="diagram.html" class="here">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
+
+<h1>pipeline — 前段の出力が次段の入力になる<span class="path">example/pipeline/</span></h1>
+<p>予約 ID を課金の入力に、課金 ID を配送の入力に渡します。見どころは<strong>補償の側</strong>です。</p>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
+    <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
+    <span><i class="sw" style="background:var(--child-bg);border-color:var(--child)"></i> 子ワークフロー</span>
+    <span><i class="sw" style="background:var(--wait-bg);border-color:var(--wait)"></i> 待ち</span>
+    <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
+  </div>
+
+<h2>ship で失敗したとき</h2>
+<div class="strip">
+  <div class="lane"><span class="tag">forward</span><span class="note">出力が次の入力になる</span></div>
+  <div class="row">
+    <div class="cell f">reserve</div>
+    <div class="arr data"><span>予約 ID</span><span class="val">res-chain</span><span>↓</span></div>
+    <div class="cell f">charge</div>
+    <div class="arr data"><span>課金 ID</span><span class="val">chg-res-chain</span><span>↓</span></div>
+    <div class="cell u">ship ✕</div>
+  </div>
+  <div class="fail-mark">▼</div>
+  <div class="lane"><span class="tag">補償</span><span class="note">forward と同じ入力を受け取る</span></div>
+  <div class="row">
+    <div class="cell u">reserve:undo</div>
+    <div class="arr data"><span class="val">res-chain</span><span>↑</span></div>
+    <div class="cell u">charge:undo</div>
+    <div class="arr data"><span class="val">chg-res-chain</span><span>↑</span></div>
+    <div class="cell u">ship:undo</div>
+  </div>
+</div>
+
+<div class="note-box">
+  <strong>補償は、そのステップ自身の出力を見られません。</strong> 登録されるのが実行より
+  前だからです。代わりに forward と同じ入力を受け取るので、<em>前段まで</em>の出力は
+  手元にあります。自分のステップの出力が要る場合は、冪等キーで引いてください。
+</div>
+
+<pre><code>chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
+    ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
+
+// Refund は同じ ChargeReq を受け取るので、req.Reservation が使える
+func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
+    a.ledger.record("charge", req.Reservation)
+    ...
+}</code></pre>
+
+<div class="spec"><b>## 前段の ID が、次段の補償にも渡っている</b>
+
+* 連鎖する注文 "chain" を "ship" で失敗させる
+* saga は "no carrier available" で失敗する
+* ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
+* 補償 "charge" が受け取った前段の ID は "res-chain"
+* 補償 "ship" が受け取った前段の ID は "chg-res-chain"</div>
+
+<footer>
+  ソース: <code>example/pipeline/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../docs/design.md">design.md</a>
+</footer>
+
+</div>
+</body>
+</html>

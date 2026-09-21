@@ -2,9 +2,13 @@
 # the build is shared instead of repeated per service.
 x-dev: &dev
   build: .
-  image: temporal-saga-dev
-  environment:
-    TEMPORAL_ADDRESS: "temporal:7233"
+  image: temporal-workflow-kit-dev
+  ports:
+    # The dev server's Web UI, for reading the history a failing scenario left
+    # behind. Declared here but not published by most recipes: `docker compose
+    # run` ignores this without --service-ports, which only `just spec-ui`
+    # passes. So `just spec` and `just ci` still bind nothing.
+    - "8233:8233"
   volumes:
     # Bind-mounted so edits on the host take effect without rebuilding the
     # image; the caches are named volumes so they survive `docker compose down`.
@@ -13,34 +17,11 @@ x-dev: &dev
     - go-build-cache:/root/.cache/go-build
 
 services:
-  temporal:
-    build: .
-    image: temporal-saga-dev
-    command: ["temporal", "server", "start-dev", "--ip", "0.0.0.0", "--headless"]
-    ports:
-      - "7233:7233"
-
-  worker:
-    <<: *dev
-    command: ["go", "run", "./cmd/worker"]
-    depends_on:
-      - temporal
-
-  starter:
-    <<: *dev
-    command: ["go", "run", "./cmd/starter"]
-    depends_on:
-      - temporal
-    profiles:
-      - starter
-
-  # Ad-hoc commands (`just build`, `just test`, `just shell`, ...). Profiled so
-  # `docker compose up` never starts it; `docker compose run` does regardless.
-  # No depends_on: `go test` should not spin up a Temporal server.
+  # Every `just` recipe runs here. The integration tests start their own
+  # Temporal dev server in-process, so there is no server service to run
+  # alongside it.
   dev:
     <<: *dev
-    profiles:
-      - dev
 
 volumes:
   go-mod-cache:

@@ -4,9 +4,9 @@ dependencies:
 - repo_url: yamakura-yuma/dotfiles
   name: core-principal
   host: github.com
-  resolved_commit: aaad378e24c129cf91aea6c9a2dc176f4211b3a5
-  resolved_ref: aaad378e24c129cf91aea6c9a2dc176f4211b3a5
-  version: 1.0.0
+  resolved_commit: 098176e47d93c136cbc9f7713abe559e75829a42
+  resolved_ref: 098176e47d93c136cbc9f7713abe559e75829a42
+  version: 1.1.0
   virtual_path: core-principal
   is_virtual: true
   package_type: apm_package
@@ -34,7 +34,7 @@ dependencies:
     .claude/skills/core-harness/SKILL.md: sha256:99c045d95e8dc280ded6ea6b097a2be74250332c29ed88d4f234484f2cfc88f0
     .claude/skills/core-retro/SKILL.md: sha256:eb696797ce02014584b939277d35552c9f02844402d480fb97f152bf56969c09
     .claude/skills/core-tools/SKILL.md: sha256:14ae4206d3a5b10d5d68c8720f7357f5a218d3b509e59bcb2e00ad8a88fb8fe2
-  content_hash: sha256:f760e9977f29814b345685e9d85c81915664ec3a256ee2ad61097bf3a23eb8aa
+  content_hash: sha256:6702e2639a56d5fca62b4fec0647c242ac27f42854b083cb57adabda912d66bb
   target_subset:
   - claude
 - repo_url: dietrichgebert/ponytail
@@ -149,6 +149,27 @@ dependencies:
   deployed_file_hashes:
     .claude/skills/ponytail-review/SKILL.md: sha256:40df33b58fc6ef889b93585733feb9566b76e9586efa7f376785c1e995197ac0
   content_hash: sha256:4646594fcd75455533f7ff1425f4f1c5ba0fa65f88241bf262b1c4fc275f049a
+  target_subset:
+  - claude
+- repo_url: gonta223/humanizer-ja
+  name: humanizer-ja
+  host: github.com
+  resolved_commit: a1e343696e43aa50e7218891f3319ab22cde3464
+  resolved_ref: a1e343696e43aa50e7218891f3319ab22cde3464
+  version: unknown
+  depth: 2
+  resolved_by: yamakura-yuma/dotfiles
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/humanizer-ja
+  - .claude/skills/humanizer-ja/LICENSE
+  - .claude/skills/humanizer-ja/README.md
+  - .claude/skills/humanizer-ja/SKILL.md
+  deployed_file_hashes:
+    .claude/skills/humanizer-ja/LICENSE: sha256:f75eb14ec27966cd36603902343e942aa1d125e7ef78cfb786ba71b29938b7dc
+    .claude/skills/humanizer-ja/README.md: sha256:657ca8e0e1750c2eb025e6e61fe229bc9eafcea3ac53694a12f69399a1a29872
+    .claude/skills/humanizer-ja/SKILL.md: sha256:3fe07f06a179801d7445eff19ed40f1681ef9860665c50c1e9a032f6dffead89
+  content_hash: sha256:b6da4ef92a941ab364ab1ddf259d9e511e098a0719f7ee2202847351c34a8194
   target_subset:
   - claude
 - repo_url: humanlayer/skills
@@ -1115,6 +1136,42 @@ deployments:
   content_hash: sha256:5c479fd562c691851690e8b18c8501045bef0943c10743d636b2fae26add1d28
 - kind: project-relative
   target: claude
+  value: .claude/skills/humanizer-ja
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja/LICENSE
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: sha256:f75eb14ec27966cd36603902343e942aa1d125e7ef78cfb786ba71b29938b7dc
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja/README.md
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: sha256:657ca8e0e1750c2eb025e6e61fe229bc9eafcea3ac53694a12f69399a1a29872
+- kind: project-relative
+  target: claude
+  value: .claude/skills/humanizer-ja/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - gonta223/humanizer-ja
+  active_owner: gonta223/humanizer-ja
+  content_hash: sha256:3fe07f06a179801d7445eff19ed40f1681ef9860665c50c1e9a032f6dffead89
+- kind: project-relative
+  target: claude
   value: .claude/skills/japanese-tech-writing
   runtime: null
   scope: project
@@ -1367,7 +1424,7 @@ deployments:
   content_hash: sha256:1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2
 - kind: project-relative
   target: claude
-  value: .claude/skills/saga-workflows
+  value: .claude/skills/saga-package
   runtime: null
   scope: project
   owners:
@@ -1376,22 +1433,13 @@ deployments:
   content_hash: null
 - kind: project-relative
   target: claude
-  value: .claude/skills/saga-workflows/SKILL.md
+  value: .claude/skills/saga-package/SKILL.md
   runtime: null
   scope: project
   owners:
   - .
   active_owner: .
-  content_hash: sha256:3bedceacb55acff17dcf5a5de2597f3b6a1470790cf76c586ea743c52d43346c
-- kind: project-relative
-  target: claude
-  value: .claude/skills/saga-workflows/references/checklist.md
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:4ab9e74fea0dae902f48a615d6cbbca7d5427430f689c1dc5a17c420a9f13687
+  content_hash: sha256:a5dccce6ea6dd8544ef309b1afc5c48467fb12119c1a463c0de28e1ccc3a8fee
 - kind: project-relative
   target: claude
   value: .claude/skills/show-me
@@ -1484,6 +1532,33 @@ deployments:
   content_hash: sha256:5856f3ae8aec742f1499c640aecdd5f1d6af5fa210a7c6ec794de8263a6f733f
 - kind: project-relative
   target: claude
+  value: .claude/skills/temporal-review
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/temporal-review/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:3a9a388d57aa4c3550f132311870c49adc50dd90a0bfbb6dd70ef0d935dc683b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/temporal-review/references/checklist.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:915ed6d2fbeb1f6c4b8c7324643a879c5d3ee88d2dcca8de9b8948fabec19010
+- kind: project-relative
+  target: claude
   value: .claude/skills/to-questionnaire
   runtime: null
   scope: project
@@ -1509,6 +1584,24 @@ deployments:
   - mattpocock/skills/skills/productivity/to-questionnaire
   active_owner: mattpocock/skills/skills/productivity/to-questionnaire
   content_hash: sha256:9e8a06c38c8842eea8d4922cb9d1ead8e3ace647bab259b943c994a1b4742bc2
+- kind: project-relative
+  target: claude
+  value: .claude/skills/upstream-docs
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/upstream-docs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b8510beafc31d82faf16dc90efc7c7cdb44b76522858d5e0e11b488078996c71
 - kind: project-relative
   target: claude
   value: .claude/skills/wait-what
@@ -1573,9 +1666,15 @@ deployments:
   active_owner: mattpocock/skills/skills/productivity/writing-for-agents
   content_hash: sha256:eacb24b2a618cfb81dacb0416f4fdd75ddf3a8060f8ddb99aae1b1e301907e4b
 local_deployed_files:
-- .claude/skills/saga-workflows
-- .claude/skills/saga-workflows/SKILL.md
-- .claude/skills/saga-workflows/references/checklist.md
+- .claude/skills/saga-package
+- .claude/skills/saga-package/SKILL.md
+- .claude/skills/temporal-review
+- .claude/skills/temporal-review/SKILL.md
+- .claude/skills/temporal-review/references/checklist.md
+- .claude/skills/upstream-docs
+- .claude/skills/upstream-docs/SKILL.md
 local_deployed_file_hashes:
-  .claude/skills/saga-workflows/SKILL.md: sha256:3bedceacb55acff17dcf5a5de2597f3b6a1470790cf76c586ea743c52d43346c
-  .claude/skills/saga-workflows/references/checklist.md: sha256:4ab9e74fea0dae902f48a615d6cbbca7d5427430f689c1dc5a17c420a9f13687
+  .claude/skills/saga-package/SKILL.md: sha256:a5dccce6ea6dd8544ef309b1afc5c48467fb12119c1a463c0de28e1ccc3a8fee
+  .claude/skills/temporal-review/SKILL.md: sha256:3a9a388d57aa4c3550f132311870c49adc50dd90a0bfbb6dd70ef0d935dc683b
+  .claude/skills/temporal-review/references/checklist.md: sha256:915ed6d2fbeb1f6c4b8c7324643a879c5d3ee88d2dcca8de9b8948fabec19010
+  .claude/skills/upstream-docs/SKILL.md: sha256:b8510beafc31d82faf16dc90efc7c7cdb44b76522858d5e0e11b488078996c71

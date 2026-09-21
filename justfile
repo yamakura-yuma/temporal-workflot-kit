@@ -1,4 +1,4 @@
-# Development commands for temporal-saga.
+# Development commands for temporal-workflow-kit.
 #
 # Everything runs inside the container built from `Dockerfile` (Go +
 # temporal-cli, pinned by `flake.nix`), so the only host-level requirements are
@@ -37,9 +37,38 @@ build:
 vet:
     {{dev}} go vet ./...
 
-# Extra args go to `go test`, e.g. `just test -run TestOrder -v`.
+# Unit tests: the saga package against the in-memory test environment.
+# Extra args go to `go test`, e.g. `just test -run TestBudget -v`.
 test *args:
     {{dev}} go test ./... {{args}}
+
+# Slower than `just test`, and the only place cancellation and search attributes
+# can actually be checked.
+# Run the executable specifications under docs/specs/, against a real dev server.
+spec *args:
+    {{dev}} gauge run {{args}}
+
+# Same run, but the dev server stays up afterwards so the histories it just
+# produced can be read at http://localhost:8233. Ctrl-C to end it.
+# Not {{dev}}: --service-ports is what actually publishes the port, and only
+# this recipe wants it, so `just spec` and `just ci` bind nothing.
+spec-ui *args:
+    docker compose run --rm --service-ports -e SPEC_HOLD=1 dev gauge run {{args}}
+
+# Check every step in docs/specs/ has an implementation, without running anything.
+spec-validate:
+    {{dev}} gauge validate
+
+# Show which Go function implements each step, since the only link between a
+# line in docs/specs/ and the code is the step text.
+spec-steps:
+    {{dev}} grep -rn '^var _ = gauge.Step("' stepImpl/ | sed -E 's/:var _ = gauge\.Step\("/  ->  /; s/".*$//'
+
+# docs と README のコード例が現行 API と合っているか、上流由来のノートが go.mod の
+# SDK 版と合っているかを確認する。docs のコードブロックはコンパイルされないので、
+# 腐りを止めるのはここだけ。
+docs-check:
+    {{dev}} bash scripts/docs-check.sh
 
 # Format the tree in place.
 fmt:
@@ -54,33 +83,7 @@ tidy:
     {{dev}} go mod tidy
 
 # Everything that must pass before a change ships.
-ci: fmt-check vet build test
-
-# --- running the service -----------------------------------------------------
-
-# Start the Temporal dev server and the worker in the background.
-up:
-    docker compose up -d temporal worker
-
-# Same, but stream the logs in the foreground (ctrl-c stops).
-up-fg:
-    docker compose up temporal worker
-
-# Stop everything and remove the containers (named caches survive).
-down:
-    docker compose down
-
-# Follow the logs of the running services.
-logs *args:
-    docker compose logs -f {{args}}
-
-# Start one workflow execution against the running dev server.
-starter:
-    docker compose run --rm starter
-
-# `temporal` CLI against the dev server, e.g. `just temporal workflow list`.
-temporal +args:
-    {{dev}} temporal --address temporal:7233 {{args}}
+ci: fmt-check vet build test docs-check spec-validate spec
 
 # --- agent config ------------------------------------------------------------
 

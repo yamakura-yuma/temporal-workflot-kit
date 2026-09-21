@@ -1,6 +1,6 @@
-name: temporal-saga
+name: temporal-workflow-kit-skills
 version: 1.0.0
-description: Agent configuration for the temporal-saga project
+description: Agent configuration for the temporal-workflow-kit project
 author: yamakura-yuma
 
 # Which agent platforms to deploy to.
@@ -12,8 +12,13 @@ targets:
 # Two sources, one deploy. `apm install` here lands both in ./.claude/ (never
 # ~/.claude/):
 #
-#   ./.apm/        this project's own domain knowledge — the saga conventions
-#                  and the review checklist that name this repo's code.
+#   ./.apm/        this project's own domain knowledge, split four ways by where
+#                  the knowledge comes from: saga-package (this saga/ package),
+#                  temporal-review (Temporal in general), gauge-specs (the
+#                  executable spec suite) and upstream-docs (how to cite or
+#                  cache an upstream doc). The last two read the same in any
+#                  repo and carry no repo-specific paths in their bodies, so
+#                  they can move to a shared package once one exists.
 #   core-principal the shared harness (rules, guard hooks, core-* skills) from
 #                  the dotfiles repo, pinned by commit because upstream
 #                  publishes no tags; bump with `apm update`.
@@ -25,7 +30,7 @@ dependencies:
   apm:
   - git: https://github.com/yamakura-yuma/dotfiles.git
     path: core-principal
-    ref: aaad378e24c129cf91aea6c9a2dc176f4211b3a5
+    ref: 098176e47d93c136cbc9f7713abe559e75829a42
     alias: core-principal
     targets:
     - claude
