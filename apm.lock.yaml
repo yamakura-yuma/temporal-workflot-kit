@@ -4,8 +4,8 @@ dependencies:
 - repo_url: yamakura-yuma/dotfiles
   name: core-principal
   host: github.com
-  resolved_commit: fa39bcaf4d782a254166e8fda1b793d3af196cd7
-  resolved_ref: fa39bcaf4d782a254166e8fda1b793d3af196cd7
+  resolved_commit: 51856cebaa34d148600b7f64d20d34fac4f2401e
+  resolved_ref: 51856cebaa34d148600b7f64d20d34fac4f2401e
   version: 1.1.0
   virtual_path: core-principal
   is_virtual: true
@@ -33,21 +33,21 @@ dependencies:
   - .claude/skills/core-tools/SKILL.md
   deployed_file_hashes:
     .claude/commands/retro.md: sha256:cb7b04b93dfd16970f5cbc260dd590cb5ead870bf0bee6e488277bfc46452890
-    .claude/commands/workers.md: sha256:b1aa5193c4e9b409bb4952c1988563d2f22791a90ef6b4b5c6efea3dfd4b5dc8
+    .claude/commands/workers.md: sha256:605b6adae0a9107da8a068ef088e94723b6b28b73c3bc32a0bfd96377ca88568
     .claude/commands/worktree.md: sha256:c6fae8cf3ed708b9db3ea1dd6aa40ff2c90d551efab5cda98917bda39f300145
     .claude/hooks/core-principal/.apm/hooks/scripts/dispatch-in-coordinator.sh: sha256:ec7cccdb823aeceee1efdd58f35c7056457c8fe4cc1b47f3e909989c5e4a6c24
-    .claude/hooks/core-principal/.apm/hooks/scripts/guard-coordinator-edit.sh: sha256:dc5c0c5528f781330ef7f0d5009febfb28d54bb9bb8b002bd0d8beb0d45f7354
-    .claude/hooks/core-principal/.apm/hooks/scripts/guard-default-branch.sh: sha256:e7ff3eb2e67e6c8d50ed599f97df08e122014109808b1dec3855b061acd3d9cd
+    .claude/hooks/core-principal/.apm/hooks/scripts/guard-coordinator-edit.sh: sha256:9f334191e8dd50272df6f5356a345ae589c88d51faac40c7b3941be3a7a6cc54
+    .claude/hooks/core-principal/.apm/hooks/scripts/guard-default-branch.sh: sha256:1a32a0d5c9399d9fd4ff5d09599d62b8985dbdf3e5b7daa6fcf358c3e5721729
     .claude/hooks/core-principal/.apm/hooks/scripts/guard-destructive-git.sh: sha256:ee57fb415c9acbf409715032196a7186fa0f161a5b1187143a40ca6f054b4d35
-    .claude/hooks/core-principal/.apm/hooks/scripts/lib/coordinator-workspace.sh: sha256:24e243938ef392c76ed238bbf16a42eb489ee0447c45916af1f57ccd43308f1e
+    .claude/hooks/core-principal/.apm/hooks/scripts/lib/coordinator-workspace.sh: sha256:db2ba153ce0ab0126f6a1c6def88150c2b67e0ebc313e4ea546ff9eae3161542
     .claude/rules/core-principal.md: sha256:2713980ffbde09797ae2a27f046e31255aada776cf505cde181def10463191ff
     .claude/skills/core-communication/SKILL.md: sha256:290c4cfbd8095fd64035de93e5fae4c3ab5e80fbd110f0317d272231e5060750
-    .claude/skills/core-dispatch/SKILL.md: sha256:d8620f9153226fb4a481f15acd5384cd05a6c835448bf9719cc9881d7ee1d8b7
-    .claude/skills/core-dispatch/references/orca.md: sha256:fa93678a6282a25227ff29d70afc188c2ce1d7ddf59dfef2007ab34a57c8db3a
+    .claude/skills/core-dispatch/SKILL.md: sha256:5cfd5f0112a3da5e9845da656b7b9cd244eab31b41ba1b5a672f6c18228bb5a6
+    .claude/skills/core-dispatch/references/orca.md: sha256:d3f6539efe8f66ede2f0a4ee57c327b3516a5b209a66dd1803081d516999b120
     .claude/skills/core-harness/SKILL.md: sha256:99c045d95e8dc280ded6ea6b097a2be74250332c29ed88d4f234484f2cfc88f0
     .claude/skills/core-retro/SKILL.md: sha256:eb696797ce02014584b939277d35552c9f02844402d480fb97f152bf56969c09
     .claude/skills/core-tools/SKILL.md: sha256:6ef187280006ff43a5fec623bbcccfcc86e53571cb156b770ddae63bf9c490cd
-  content_hash: sha256:525d3eb032a8ceb29261e0283e98d7be0325b0fccbf1719080913d3f6d68614a
+  content_hash: sha256:61f5a01168db79fe0d9231e6fd0fc20e5b28633b09a15bdc6cecd0b9f20e55a7
   target_subset:
   - claude
 - repo_url: dietrichgebert/ponytail
@@ -587,7 +587,7 @@ deployments:
   owners:
   - yamakura-yuma/dotfiles/core-principal
   active_owner: yamakura-yuma/dotfiles/core-principal
-  content_hash: sha256:b1aa5193c4e9b409bb4952c1988563d2f22791a90ef6b4b5c6efea3dfd4b5dc8
+  content_hash: sha256:605b6adae0a9107da8a068ef088e94723b6b28b73c3bc32a0bfd96377ca88568
 - kind: project-relative
   target: claude
   value: .claude/commands/worktree.md
@@ -614,7 +614,7 @@ deployments:
   owners:
   - yamakura-yuma/dotfiles/core-principal
   active_owner: yamakura-yuma/dotfiles/core-principal
-  content_hash: sha256:dc5c0c5528f781330ef7f0d5009febfb28d54bb9bb8b002bd0d8beb0d45f7354
+  content_hash: sha256:9f334191e8dd50272df6f5356a345ae589c88d51faac40c7b3941be3a7a6cc54
 - kind: project-relative
   target: claude
   value: .claude/hooks/core-principal/.apm/hooks/scripts/guard-default-branch.sh
@@ -623,7 +623,7 @@ deployments:
   owners:
   - yamakura-yuma/dotfiles/core-principal
   active_owner: yamakura-yuma/dotfiles/core-principal
-  content_hash: sha256:e7ff3eb2e67e6c8d50ed599f97df08e122014109808b1dec3855b061acd3d9cd
+  content_hash: sha256:1a32a0d5c9399d9fd4ff5d09599d62b8985dbdf3e5b7daa6fcf358c3e5721729
 - kind: project-relative
   target: claude
   value: .claude/hooks/core-principal/.apm/hooks/scripts/guard-destructive-git.sh
@@ -641,7 +641,7 @@ deployments:
   owners:
   - yamakura-yuma/dotfiles/core-principal
   active_owner: yamakura-yuma/dotfiles/core-principal
-  content_hash: sha256:24e243938ef392c76ed238bbf16a42eb489ee0447c45916af1f57ccd43308f1e
+  content_hash: sha256:db2ba153ce0ab0126f6a1c6def88150c2b67e0ebc313e4ea546ff9eae3161542
 - kind: project-relative
   target: claude
   value: .claude/rules/core-principal.md
@@ -722,7 +722,7 @@ deployments:
   owners:
   - yamakura-yuma/dotfiles/core-principal
   active_owner: yamakura-yuma/dotfiles/core-principal
-  content_hash: sha256:d8620f9153226fb4a481f15acd5384cd05a6c835448bf9719cc9881d7ee1d8b7
+  content_hash: sha256:5cfd5f0112a3da5e9845da656b7b9cd244eab31b41ba1b5a672f6c18228bb5a6
 - kind: project-relative
   target: claude
   value: .claude/skills/core-dispatch/references/orca.md
@@ -731,7 +731,7 @@ deployments:
   owners:
   - yamakura-yuma/dotfiles/core-principal
   active_owner: yamakura-yuma/dotfiles/core-principal
-  content_hash: sha256:fa93678a6282a25227ff29d70afc188c2ce1d7ddf59dfef2007ab34a57c8db3a
+  content_hash: sha256:d3f6539efe8f66ede2f0a4ee57c327b3516a5b209a66dd1803081d516999b120
 - kind: project-relative
   target: claude
   value: .claude/skills/core-harness
@@ -804,6 +804,24 @@ deployments:
   - vercel-labs/skills/skills/find-skills
   active_owner: vercel-labs/skills/skills/find-skills
   content_hash: sha256:c00eeea0e13e74fe4a9d84ba0a8542205a1b736d65f13134fe1a6647eb14976f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/godog-specs
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/godog-specs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:c2241c99a261a6aa03b347c6b00170f5b5d24fbbb7d2c9fd32ab1a9a6b36add7
 - kind: project-relative
   target: claude
   value: .claude/skills/grill-me
@@ -1307,7 +1325,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:915ed6d2fbeb1f6c4b8c7324643a879c5d3ee88d2dcca8de9b8948fabec19010
+  content_hash: sha256:ae061e3246759b0b7fb465a25646dd7e093dc543cef28b87fd881b21768a2a01
 - kind: project-relative
   target: claude
   value: .claude/skills/to-questionnaire
@@ -1417,6 +1435,8 @@ deployments:
   active_owner: mattpocock/skills/skills/productivity/writing-for-agents
   content_hash: sha256:eacb24b2a618cfb81dacb0416f4fdd75ddf3a8060f8ddb99aae1b1e301907e4b
 local_deployed_files:
+- .claude/skills/godog-specs
+- .claude/skills/godog-specs/SKILL.md
 - .claude/skills/saga-package
 - .claude/skills/saga-package/SKILL.md
 - .claude/skills/temporal-review
@@ -1425,7 +1445,8 @@ local_deployed_files:
 - .claude/skills/upstream-docs
 - .claude/skills/upstream-docs/SKILL.md
 local_deployed_file_hashes:
+  .claude/skills/godog-specs/SKILL.md: sha256:c2241c99a261a6aa03b347c6b00170f5b5d24fbbb7d2c9fd32ab1a9a6b36add7
   .claude/skills/saga-package/SKILL.md: sha256:a5dccce6ea6dd8544ef309b1afc5c48467fb12119c1a463c0de28e1ccc3a8fee
   .claude/skills/temporal-review/SKILL.md: sha256:3a9a388d57aa4c3550f132311870c49adc50dd90a0bfbb6dd70ef0d935dc683b
-  .claude/skills/temporal-review/references/checklist.md: sha256:915ed6d2fbeb1f6c4b8c7324643a879c5d3ee88d2dcca8de9b8948fabec19010
+  .claude/skills/temporal-review/references/checklist.md: sha256:ae061e3246759b0b7fb465a25646dd7e093dc543cef28b87fd881b21768a2a01
   .claude/skills/upstream-docs/SKILL.md: sha256:b8510beafc31d82faf16dc90efc7c7cdb44b76522858d5e0e11b488078996c71
