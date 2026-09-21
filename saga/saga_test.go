@@ -100,6 +100,9 @@ type plan struct {
 	// ReturnNil makes the body return a nil error even when a step failed,
 	// i.e. the caller forgot to check.
 	ReturnNil bool `json:"return_nil"`
+	// Parallel and ContinueWithError go straight to saga.Options.
+	Parallel          bool `json:"parallel"`
+	ContinueWithError bool `json:"continue_with_error"`
 }
 
 func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
@@ -112,7 +115,10 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
+	return saga.RunOrCompensate(ctx, saga.Options{
+		ParallelCompensation: p.Parallel,
+		ContinueWithError:    p.ContinueWithError,
+	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		var out []string
 		for i, spec := range p.Steps {
 			in := req{Step: spec.Name, Fail: spec.Fail}
@@ -235,39 +241,36 @@ func TestForwardAndCompensationShareTheKey(t *testing.T) {
 	require.NotEqual(t, keys["do:a"], keys["do:b"], "each step needs its own key")
 }
 
-// The key is derived from the run, not from FirstRunID.
+// The name a step puts on its activities is derived from the run, not from
+// FirstRunID.
 //
-// FirstRunID is preserved across ContinueAsNew, Retry, Cron and Reset, while a
-// saga's step counter starts over in the new run -- so a key built on it would
-// repeat the previous run's keys and every step would look like one that had
-// already been applied. Keying on RunID and the step name avoids both that and
-// the shifting that a positional counter causes when a step is inserted.
-func TestDefaultKeyIsScopedToTheRun(t *testing.T) {
-	var ts testsuite.WorkflowTestSuite
-	env := ts.NewTestWorkflowEnvironment()
+// FirstRunID is preserved across ContinueAsNew, Retry, Cron and Reset, so a
+// name built on it would repeat the previous run's names: the two runs' steps
+// would be indistinguishable in a history, and a caller who built an
+// idempotency key the same way -- which docs/activity-contract.md tells them to
+// -- would have every step of the second run look like one already applied.
+func TestStepNameIsScopedToTheRun(t *testing.T) {
+	env, r := newEnv(t)
 
-	probe := func(ctx workflow.Context) (map[string]string, error) {
-		info := workflow.GetInfo(ctx)
-		return map[string]string{
-			"key":        saga.StepKey(ctx, "charge"),
-			"runID":      info.WorkflowExecution.RunID,
-			"firstRunID": info.FirstRunID,
-		}, nil
-	}
-	env.RegisterWorkflow(probe)
-	env.ExecuteWorkflow(probe)
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:      steps("charge"),
+		SleepAfter: -1,
+	})
 	require.NoError(t, env.GetWorkflowError())
 
-	var got map[string]string
-	require.NoError(t, env.GetWorkflowResult(&got))
+	_, keys := r.snapshot()
+	key := keys["do:charge"]
 
-	require.Equal(t, got["runID"]+"/charge", got["key"])
-	require.NotEmpty(t, got["runID"])
-	require.Contains(t, got["key"], "/", "a purely numeric key can collide with the SDK's default ActivityID")
+	require.NotEmpty(t, key)
+	require.True(t, strings.HasSuffix(key, "/charge"), "got %q", key)
+	require.Contains(t, key, "/",
+		"a purely numeric name can collide with the SDK's default ActivityID")
 
-	// Pins the reason FirstRunID is not used here: the test environment does not
-	// populate it, so a key built on it would be untestable as well as wrong.
-	require.Empty(t, got["firstRunID"])
+	// The run id is the other half, and it is not the FirstRunID: the test
+	// environment leaves that empty, so a name built on it would be untestable
+	// as well as wrong.
+	runID := strings.TrimSuffix(key, "/charge")
+	require.NotEmpty(t, runID)
 }
 
 // A body that returns nil after a step failed must still fail the workflow and
@@ -648,4 +651,85 @@ func TestClearLetsTheBodyReportItsOwnError(t *testing.T) {
 	err := env.GetWorkflowError()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nobody reviewed")
+}
+
+// --- the two Options ---------------------------------------------------------
+
+// By default a failing compensation stops the ones still to run, and they are
+// reported as skipped rather than dropped. This is the Java SDK's default too.
+func TestCompensationStopsAtTheFirstFailure(t *testing.T) {
+	env, r := newEnv(t)
+
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:      []stepSpec{{Name: "a"}, {Name: "b", UndoFails: true}, {Name: "c", Fail: true}},
+		SleepAfter: -1,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	err := env.GetWorkflowError()
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr))
+
+	var report saga.CompensationReport
+	require.NoError(t, appErr.Details(&report))
+	require.Equal(t, []string{"b"}, report.Failed)
+	require.Equal(t, []string{"a"}, report.Skipped, "a never ran and has to be reported")
+
+	calls, _ := r.snapshot()
+	require.Equal(t, []string{"do:a", "do:b", "do:c", "undo:c", "undo:b"}, calls,
+		"a's compensation must not run")
+}
+
+// ContinueWithError runs the rest anyway.
+func TestContinueWithErrorRunsTheRest(t *testing.T) {
+	env, r := newEnv(t)
+
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:             []stepSpec{{Name: "a"}, {Name: "b", UndoFails: true}, {Name: "c", Fail: true}},
+		SleepAfter:        -1,
+		ContinueWithError: true,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(env.GetWorkflowError(), &appErr))
+
+	var report saga.CompensationReport
+	require.NoError(t, appErr.Details(&report))
+	require.Equal(t, []string{"b"}, report.Failed)
+	require.Empty(t, report.Skipped)
+
+	calls, _ := r.snapshot()
+	require.Equal(t, []string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"}, calls)
+}
+
+// ParallelCompensation dispatches every compensation before awaiting any of
+// them, so one failing cannot stop another from being tried -- which is why
+// ContinueWithError has no meaning alongside it. The order they finish in is
+// not promised, so this pins the set rather than the sequence.
+func TestParallelCompensationRunsThemAll(t *testing.T) {
+	env, r := newEnv(t)
+
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:      []stepSpec{{Name: "a"}, {Name: "b", UndoFails: true}, {Name: "c", Fail: true}},
+		SleepAfter: -1,
+		Parallel:   true,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(env.GetWorkflowError(), &appErr))
+
+	var report saga.CompensationReport
+	require.NoError(t, appErr.Details(&report))
+	require.Equal(t, []string{"b"}, report.Failed)
+	require.Empty(t, report.Skipped, "nothing is skipped: they were all dispatched")
+
+	calls, _ := r.snapshot()
+	require.ElementsMatch(t,
+		[]string{"do:a", "do:b", "do:c", "undo:a", "undo:b", "undo:c"}, calls,
+		"every compensation runs, including the ones after the failure")
 }

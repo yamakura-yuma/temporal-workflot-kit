@@ -70,10 +70,10 @@ func (s *Saga) Step(ctx workflow.Context, name string, do, undo func(workflow.Co
 		return err
 	}
 
-	id := StepKey(ctx, name)
+	id := stepKey(ctx, name)
 
 	if undo != nil {
-		s.addUndo(name, func(cctx workflow.Context) error {
+		s.addCompensation(name, func(cctx workflow.Context) error {
 			return undo(withActivityID(cctx, id+undoSuffix))
 		})
 	}

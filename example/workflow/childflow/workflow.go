@@ -11,7 +11,7 @@
 // ExecuteActivity for the other is a choice made here, in two methods.
 //
 // Both halves act under the same idempotency key because this workflow derives
-// it once, with saga.StepKey, and passes it to both. The key travels in the
+// it once, in packKey below, and passes it to both. The key travels in the
 // request like any other field -- it does not ride on anything Temporal owns,
 // and the activities never have to ask the library for it.
 package childflow
@@ -52,7 +52,7 @@ func ChildflowWorkflow(ctx workflow.Context, in activity.Order) (Receipt, error)
 
 	return saga.RunOrCompensate(ctx, saga.Options{},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-			w := &fulfillment{in: in, packKey: saga.StepKey(ctx, "pack")}
+			w := &fulfillment{in: in, packKey: packKey(ctx)}
 
 			s.Step(ctx, "reserve", w.reserve, w.unreserve)
 			s.Step(ctx, "pack", w.pack, w.unpack)
@@ -125,4 +125,13 @@ func PackWorkflow(ctx workflow.Context, req activity.PackReq) (string, error) {
 	var id string
 	err := workflow.ExecuteActivity(ctx, acts.Pack, req).Get(ctx, &id)
 	return id, err
+}
+
+// packKey is the idempotency key both halves of the packing step act under.
+// Nothing in the saga library builds it: a key has to be unique to one step of
+// one run, and that is the run id and the step name. Do not build it from
+// FirstRunID, which survives Retry and Reset and would hand a second run the
+// first one's keys.
+func packKey(ctx workflow.Context) string {
+	return workflow.GetInfo(ctx).WorkflowExecution.RunID + "/pack"
 }

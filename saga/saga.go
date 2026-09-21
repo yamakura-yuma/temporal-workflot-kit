@@ -18,11 +18,27 @@ const undoSuffix = ":undo"
 
 // Options configures a saga.
 type Options struct {
-	// StopOnCompensationError stops the compensation phase at the first
-	// failure. The default (false) runs the remaining compensations anyway,
-	// which is usually what you want: one refund failing is no reason to leave
-	// the inventory reserved too.
-	StopOnCompensationError bool
+	// ParallelCompensation fires every compensation at once instead of running
+	// them in reverse order. The default is reverse order, which is what a
+	// rollback usually means: a step that ran later may depend on one that ran
+	// earlier, and undoing them out of order can fail.
+	//
+	// Set it only when the steps are genuinely independent. ContinueWithError
+	// has no effect here, because every compensation is dispatched before any
+	// of them is awaited.
+	//
+	// The Java SDK's io.temporal.workflow.Saga has the same two options, under
+	// the same names.
+	ParallelCompensation bool
+
+	// ContinueWithError keeps running the remaining compensations after one of
+	// them fails, instead of stopping at the first failure.
+	//
+	// The default matches the Java SDK's: stop. Think before taking it, though
+	// -- a refund failing is not much of a reason to leave the inventory
+	// reserved as well, and whatever is left unrun is reported as Skipped
+	// rather than attempted.
+	ContinueWithError bool
 
 	// CompensationFailedAttribute, when set, is flipped to true if any
 	// compensation fails or is skipped, so operators can search for sagas that
@@ -105,18 +121,14 @@ func newSaga(o Options) *Saga {
 	return &Saga{opts: o, names: map[string]struct{}{}}
 }
 
-// StepKey derives a value unique to one step of one workflow run, which is what
-// an idempotency key has to be.
+// stepKey names a step within one workflow run. Step puts it on the activities
+// the step starts, so that a history reads the way the saga was written.
 //
-// The library does not use it or pass it anywhere. It is here because deriving
-// it is the one part Temporal does not do for you, and getting it wrong is
-// quiet: keying on FirstRunID, for instance, reuses the previous run's keys
-// after a Retry or a Reset, and every step is then mistaken for one that
-// already ran.
-//
-// Put the result in the request you send, where the service you call can
-// enforce it. See docs/activity-contract.md.
-func StepKey(ctx workflow.Context, name string) string {
+// It is also the shape an idempotency key wants, which is why
+// docs/activity-contract.md tells callers to build one like this. The library
+// does not build it for them: the key belongs in the request they send, and
+// nothing here would know where to put it.
+func stepKey(ctx workflow.Context, name string) string {
 	return workflow.GetInfo(ctx).WorkflowExecution.RunID + "/" + name
 }
 
@@ -133,12 +145,13 @@ func (s *Saga) Err() error { return s.err }
 // run unless a later step fails or the body returns an error.
 func (s *Saga) Clear() { s.err = nil }
 
-// addUndo records a compensation. Only Step calls it, and it does so before
+// addCompensation records a compensation, the way the Java SDK's Saga does.
+// Unlike that one it is not exported: only Step calls it, and it does so before
 // running the forward half, which is the ordering the whole package exists to
 // guarantee. It is not exported for that reason: a caller who could register a
 // compensation directly could register it too late, or after the saga has
 // already failed, and nothing would say so.
-func (s *Saga) addUndo(name string, run func(workflow.Context) error) {
+func (s *Saga) addCompensation(name string, run func(workflow.Context) error) {
 	s.undos = append(s.undos, undo{name: name, run: run})
 }
 
@@ -168,8 +181,8 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 
 	// A disconnected context does not inherit the parent's cancellation, so
 	// compensations still run after the workflow is canceled. Nothing outside
-	// can cancel it either, which is why every compensation is bounded by what
-	// is left of the budget.
+	// can cancel it either, which is why a compensation needs a
+	// ScheduleToCloseTimeout of its own.
 	dctx, cancel := workflow.NewDisconnectedContext(ctx)
 	defer cancel()
 
@@ -178,20 +191,48 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 	var failed, skipped []string
 	var first error
 
-	for i := len(s.undos) - 1; i >= 0; i-- {
-		u := s.undos[i]
+	record := func(name string, err error) {
+		logger.Error("saga: compensation failed", "step", name, "error", err)
+		failed = append(failed, name)
+		if first == nil {
+			first = err
+		}
+	}
 
-		if err := u.run(dctx); err != nil {
-			logger.Error("saga: compensation failed", "step", u.name, "error", err)
-			failed = append(failed, u.name)
-			if first == nil {
-				first = err
+	if s.opts.ParallelCompensation {
+		// Every compensation is dispatched before any of them is awaited, so
+		// one failing cannot stop another from being tried. Failures are
+		// collected in registration order to keep the report deterministic.
+		errs := make([]error, len(s.undos))
+
+		wg := workflow.NewWaitGroup(dctx)
+		for i := range s.undos {
+			wg.Add(1)
+			workflow.Go(dctx, func(gctx workflow.Context) {
+				defer wg.Done()
+				errs[i] = s.undos[i].run(gctx)
+			})
+		}
+		wg.Wait(dctx)
+
+		for i, err := range errs {
+			if err != nil {
+				record(s.undos[i].name, err)
 			}
-			if s.opts.StopOnCompensationError {
-				for j := i - 1; j >= 0; j-- {
-					skipped = append(skipped, s.undos[j].name)
+		}
+	} else {
+		for i := len(s.undos) - 1; i >= 0; i-- {
+			u := s.undos[i]
+
+			if err := u.run(dctx); err != nil {
+				record(u.name, err)
+
+				if !s.opts.ContinueWithError {
+					for j := i - 1; j >= 0; j-- {
+						skipped = append(skipped, s.undos[j].name)
+					}
+					break
 				}
-				break
 			}
 		}
 	}

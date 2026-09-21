@@ -64,6 +64,26 @@ ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 **ローカルアクティビティも書けます。** ただし取り消しが要る副作用を置く場所ではありません。
 リトライがワークフロータスク内で完結してサーバに残らないためです。
 
+### 補償の順番と、失敗したとき
+
+既定は**逆順**で、**最初の失敗で止めます**。止まったぶんは `CompensationReport.Skipped`
+として報告されるので、落ちたのか元からやっていないのかは区別できます。
+
+```go
+saga.Options{
+    ParallelCompensation: true,   // 逆順をやめて全部同時に投げる
+    ContinueWithError:    true,   // 1本失敗しても残りを続ける
+}
+```
+
+どちらも Java SDK の `io.temporal.workflow.Saga` と同じ名前・同じ既定です。ただし
+**`ContinueWithError` は入れたほうがよい場面が多い**と思います。返金が失敗したからといって、
+在庫を押さえたままにする理由はあまりありません（`example/workflow/order/` はそうしています）。
+
+`ParallelCompensation` は**ステップが本当に独立しているときだけ**です。後のステップが前の
+ステップに依存しているなら、逆順でないと取り消せません。並列のときは全部を投げてから待つので、
+`ContinueWithError` は意味を持ちません。
+
 ### 補償のタイムアウト
 
 **補償は `workflow.NewDisconnectedContext` の上で走るので、外から誰も止められません。**

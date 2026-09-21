@@ -65,7 +65,11 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 		RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
-	opts := saga.Options{}
+	// The default is the Java SDK's: stop at the first compensation that fails.
+	// This saga takes the other one. A refund failing is no reason to leave the
+	// stock reserved as well, and whatever cannot be undone is reported either
+	// way.
+	opts := saga.Options{ContinueWithError: true}
 	if in.MarkAttribute {
 		opts.CompensationFailedAttribute = &CompensationFailedAttribute
 	}

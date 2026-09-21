@@ -59,6 +59,20 @@
 // write: ExecuteActivity, ExecuteChildWorkflow, a signal, the options on the
 // context, and what you do with the result.
 //
+// # Options
+//
+// Both are off by default and both are named after the Java SDK's
+// io.temporal.workflow.Saga, which has the same two:
+//
+//	ParallelCompensation  fire every compensation at once instead of running
+//	                      them in reverse order
+//	ContinueWithError     keep going after a compensation fails, instead of
+//	                      stopping and reporting the rest as skipped
+//
+// The Java SDK stops at the first failure too. Consider taking the other one:
+// a refund failing is not much of a reason to leave the stock reserved as
+// well.
+//
 // # What you still have to do yourself
 //
 // Bound your compensations. They run on a context nothing can cancel from the
