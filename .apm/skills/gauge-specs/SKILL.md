@@ -45,6 +45,10 @@ stepImpl/steps.go
 - `just spec-validate` — 実装の無いステップを file:line 付きで、サーバを起動せずに
   報告する。`just ci` の一部。
 - `just spec-steps` — どの Go 関数がどのステップを実装しているかの対応表。
+- `just spec-ui` — 同じ実行だが、終わっても dev server を残す。落ちたシナリオの
+  ワークフロー履歴を `http://localhost:8233` で読むため。**シナリオが落ちた理由が
+  ステップ文から読み取れないときは、まずこれを使う。** `WorkflowID` は
+  `saga-<注文 id>`。Ctrl-C で終了。
 - 逆引き（コードから仕様）は `docs/specs/` をステップ文で検索する。
 
 ## 書き方

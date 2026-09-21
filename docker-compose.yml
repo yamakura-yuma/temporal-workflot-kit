@@ -3,6 +3,12 @@
 x-dev: &dev
   build: .
   image: temporal-workflow-kit-dev
+  ports:
+    # The dev server's Web UI, for reading the history a failing scenario left
+    # behind. Declared here but not published by most recipes: `docker compose
+    # run` ignores this without --service-ports, which only `just spec-ui`
+    # passes. So `just spec` and `just ci` still bind nothing.
+    - "8233:8233"
   volumes:
     # Bind-mounted so edits on the host take effect without rebuilding the
     # image; the caches are named volumes so they survive `docker compose down`.

@@ -7,6 +7,7 @@
 just ci              # fmt-check, vet, build, ユニットテスト, docs-check, spec-validate, 仕様
 just test            # ユニットテスト（インメモリのテスト環境）
 just spec            # docs/specs/ の仕様（実際の dev server 相手）
+just spec-ui         # 同じ実行だが dev server を残す（履歴を localhost:8233 で読む）
 just spec-validate   # 全ステップに実装があるかを、実行せずに確認
 just spec-steps      # どの Go 関数がどのステップを実装しているかの対応表
 just docs-check      # docs のコード例と、上流由来のノートの版

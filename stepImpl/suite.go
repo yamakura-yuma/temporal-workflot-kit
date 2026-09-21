@@ -10,6 +10,7 @@ package stepImpl
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -28,6 +29,16 @@ import (
 	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
 	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
 )
+
+// uiPort is the dev server's Web UI, published by the spec-ui recipe. It is
+// fixed rather than free-picked so that the URL printed below is the URL that
+// docker-compose.yml publishes.
+const uiPort = "8233"
+
+// holdEnv keeps the dev server running after the run, so that the histories the
+// scenarios just produced can be read in the UI. Set by `just spec-ui`; unset
+// everywhere else, which is what keeps `just spec` and `just ci` unchanged.
+const holdEnv = "SPEC_HOLD"
 
 // Suite-wide, because they are started once per run. Per-scenario state goes in
 // Gauge's scenario store instead, so that it cannot leak between scenarios.
@@ -60,6 +71,18 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	devServer, err = testsuite.StartDevServer(ctx, testsuite.DevServerOptions{
 		ExistingPath: exe,
 		LogLevel:     "error",
+
+		// The Web UI is what a failing scenario is read in: the history shows
+		// every activity the saga scheduled, in order, which is the same thing
+		// the specifications assert as a string. It costs nothing when nobody
+		// opens it, and `just spec-ui` keeps the server up long enough to.
+		//
+		// The UI binds to 127.0.0.1 by default, which is the container's own
+		// loopback and so unreachable from the host.
+		EnableUI:  true,
+		UIPort:    uiPort,
+		ExtraArgs: []string{"--ui-ip", "0.0.0.0"},
+
 		// A saga can only flag itself if the server knows the attribute.
 		SearchAttributes: temporal.NewSearchAttributes(
 			order.CompensationFailedAttribute.ValueSet(false),
@@ -145,6 +168,17 @@ var _ = gauge.AfterSuite(func(*m.ExecutionInfo) {
 	if temporalWorker != nil {
 		temporalWorker.Stop()
 	}
+
+	// The workers are down by now, but the server still answers for history, so
+	// everything the scenarios just did is readable. Blocking here is the whole
+	// point: without it the server outlives the run by no time at all.
+	if os.Getenv(holdEnv) != "" && devServer != nil {
+		fmt.Fprintf(os.Stderr, "\n  履歴を読む: http://localhost:%s\n", uiPort)
+		fmt.Fprintf(os.Stderr, "  WorkflowID は saga-<注文 id>（例: saga-cancelme, saga-undofails）\n")
+		fmt.Fprintf(os.Stderr, "  終了するには Ctrl-C\n\n")
+		select {}
+	}
+
 	if devServer != nil {
 		_ = devServer.Stop()
 	}

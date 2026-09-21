@@ -48,6 +48,13 @@ test *args:
 spec *args:
     {{dev}} gauge run {{args}}
 
+# Same run, but the dev server stays up afterwards so the histories it just
+# produced can be read at http://localhost:8233. Ctrl-C to end it.
+# Not {{dev}}: --service-ports is what actually publishes the port, and only
+# this recipe wants it, so `just spec` and `just ci` bind nothing.
+spec-ui *args:
+    docker compose run --rm --service-ports -e SPEC_HOLD=1 dev gauge run {{args}}
+
 # Check every step in docs/specs/ has an implementation, without running anything.
 spec-validate:
     {{dev}} gauge validate

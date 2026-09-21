@@ -50,6 +50,8 @@ example は1テーマ1個。増やすときもこの単位を守り、`diagram.h
 - `just` — レシピ一覧
 - `just build` / `just vet` / `just test` — Go のビルド、vet、ユニットテスト
 - `just spec` — `docs/specs/` の仕様を実際の dev server に対して実行
+- `just spec-ui` — 同じ実行だが dev server を残し、履歴を `http://localhost:8233`
+  で読めるようにする。落ちたシナリオを調べるとき
 - `just spec-validate` — 全ステップに実装があるかを、実行せずに確認
 - `just spec-steps` — どの Go 関数がどのステップを実装しているかの対応表
 - `just docs-check` — docs と README のコード例が現行 API と合っているか、上流由来の
