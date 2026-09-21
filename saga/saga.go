@@ -12,9 +12,9 @@ import (
 
 // undoSuffix distinguishes a compensation's ActivityID from its forward step's.
 // Temporal panics on a duplicate command ID within one workflow execution
-// ("[TMPRL1100] adding duplicate command"), so the two cannot share an ID.
-// IdempotencyKey strips this again, which is why both halves of a step observe
-// the same key.
+// ("[TMPRL1100] adding duplicate command"), so the two cannot share an ID. It
+// is also what makes a rollback legible in a history: "charge" and
+// "charge:undo" sit next to each other.
 const undoSuffix = ":undo"
 
 // Options configures a saga.
@@ -151,13 +151,12 @@ func (s *Saga) Err() error { return s.err }
 // run unless a later step fails or the body returns an error.
 func (s *Saga) Clear() { s.err = nil }
 
-// Add registers a compensation that none of the Undo constructors fits -- a
-// local activity, or anything else that has to be wired by hand. It is the
-// escape hatch from UndoActivity, UndoChildWorkflow and UndoFunc.
-//
-// Register the compensation before starting the work it undoes, for the same
-// reason a step does: an operation that times out may still have taken effect.
-func (s *Saga) Add(name string, run func(workflow.Context) error) {
+// addUndo records a compensation. Only Step calls it, and it does so before
+// running the forward half, which is the ordering the whole package exists to
+// guarantee. It is not exported for that reason: a caller who could register a
+// compensation directly could register it too late, or after the saga has
+// already failed, and nothing would say so.
+func (s *Saga) addUndo(name string, run func(workflow.Context) error) {
 	s.undos = append(s.undos, undo{name: name, run: run})
 }
 
@@ -231,8 +230,8 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 
 type budgetKey struct{}
 
-// withBudget carries the remaining compensation budget so that runUndo can clamp
-// a compensation activity's ScheduleToCloseTimeout to it.
+// withBudget carries the remaining compensation budget so a compensation can
+// read it with RemainingBudget.
 func withBudget(ctx workflow.Context, remaining time.Duration) workflow.Context {
 	return workflow.WithValue(ctx, budgetKey{}, remaining)
 }
@@ -241,8 +240,10 @@ func withBudget(ctx workflow.Context, remaining time.Duration) workflow.Context 
 // whether there is a budget at all. It returns false outside the compensation
 // phase.
 //
-// Activity and ChildWorkflow steps use it to clamp their own timeouts. Call it from a
-// compensation registered with Add, which the library cannot clamp for you.
+// The library does not shorten anything for you. A compensation that could
+// outlast the rollback it belongs to should read this and clamp its own
+// ScheduleToCloseTimeout, or the budget only decides whether the next
+// compensation is started, not how long this one may take.
 func RemainingBudget(ctx workflow.Context) (time.Duration, bool) {
 	d, ok := ctx.Value(budgetKey{}).(time.Duration)
 	return d, ok

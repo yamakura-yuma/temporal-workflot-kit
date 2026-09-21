@@ -10,25 +10,26 @@ import (
 // reports whether one arrived before the timeout.
 //
 // It is a plain helper, not a step: waiting has no side effect, so there is
-// nothing to register and nothing to undo. Wrap it in a Func step, which is
-// what turns "nobody answered" into a failure of the saga and makes the wait
-// skippable once an earlier step has failed:
+// nothing to register and nothing to undo. Make it the forward half of a step,
+// with no compensation, which is what turns "nobody answered" into a failure of
+// the saga and makes the wait skippable once an earlier step has failed:
 //
-//	func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
-//	    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+//	saga.Step(ctx, s, "approval", w.await, nil)
+//
+//	func (w *fulfillment) await(ctx workflow.Context) error {
+//	    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, w.wait())
 //	    if !ok {
-//	        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+//	        return temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
 //	    }
 //	    if !decision.Approved {
-//	        return Decision{}, temporal.NewApplicationError("rejected", DeniedType, nil)
+//	        return temporal.NewApplicationError("rejected", DeniedType, nil)
 //	    }
-//	    return decision, nil
+//	    w.approvedBy = decision.By
+//	    return nil
 //	}
 //
-//	saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
-//
 // Called directly in the body of a saga it will wait its full timeout even
-// after a step has failed, which is the reason to wrap it.
+// after a step has failed, which is the reason to make it a step.
 //
 // A cancellation while waiting ends the wait with ok false.
 func AwaitSignal[T any](ctx workflow.Context, signalName string, timeout time.Duration) (T, bool) {

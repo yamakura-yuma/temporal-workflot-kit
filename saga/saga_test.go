@@ -221,10 +221,10 @@ func TestCompensatesInReverseIncludingTheFailedStep(t *testing.T) {
 // A step's forward activity and its compensation must observe the same
 // idempotency key: that is how a compensation finds the work it has to undo.
 //
-// The key is read through the activity's ActivityID, so this only holds when
-// the real activity function runs. A mock set up with .Return(value) replaces
-// the function and would never call IdempotencyKey -- use .Return(fn) or
-// .Run(fn) if you need a mock here.
+// The name is read off the activity's ActivityID, so this only holds when the
+// real activity function runs. A mock set up with .Return(value) replaces the
+// function and would never look at its context -- use .Return(fn) or .Run(fn)
+// if you need a mock here.
 func TestForwardAndCompensationShareTheKey(t *testing.T) {
 	env, r := newEnv(t)
 

@@ -20,6 +20,10 @@ grep -rnE "$gone" docs .apm README.md \
   | grep -v '^docs/design\.md:' \
   | grep -v '^docs/activity-contract\.md:' > "$tmp" || true
 
+# saga/*.go のコメントも同じ腐り方をする。ここは prefix が付かないので別の綴りで見る。
+grep -rnE '\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|runUndo|stepID)\b' \
+  saga/*.go >> "$tmp" || true
+
 if [ -s "$tmp" ]; then
   echo "消した API がドキュメントに残っている（ステップの両半分は" >&2
   echo "func(workflow.Context) error、冪等キーは saga.StepKey）:" >&2

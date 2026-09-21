@@ -47,7 +47,16 @@ import "go.temporal.io/sdk/workflow"
 //
 // It also means one activity per step. A do that starts two would give them the
 // same id and the server would reject the second, which is loud rather than
-// subtle. Set your own options inside do if you need more than one.
+// subtle.
+//
+// Set the options before calling Step. If a step needs its own -- a
+// compensation usually wants more attempts than the forward half did -- read
+// them, change what you want, and put them back, because replacing the struct
+// wholesale drops the id along with everything else:
+//
+//	opts := workflow.GetActivityOptions(ctx)
+//	opts.RetryPolicy = &temporal.RetryPolicy{MaximumAttempts: 5}
+//	ctx = workflow.WithActivityOptions(ctx, opts)
 //
 // An idempotency key is not this id and is not the library's business: build
 // one from the run and the step name and put it in the request, where the
@@ -61,10 +70,10 @@ func Step(ctx workflow.Context, s *Saga, name string, do, undo func(workflow.Con
 		return err
 	}
 
-	id := stepID(ctx, name)
+	id := StepKey(ctx, name)
 
 	if undo != nil {
-		s.Add(name, func(cctx workflow.Context) error {
+		s.addUndo(name, func(cctx workflow.Context) error {
 			return undo(withActivityID(cctx, id+undoSuffix))
 		})
 	}
@@ -74,13 +83,6 @@ func Step(ctx workflow.Context, s *Saga, name string, do, undo func(workflow.Con
 		return err
 	}
 	return nil
-}
-
-// stepID is the name a step's activities carry in the history. The run id is in
-// it so that a retried or continued workflow cannot be mistaken for the run
-// before it.
-func stepID(ctx workflow.Context, name string) string {
-	return StepKey(ctx, name)
 }
 
 // withActivityID puts id on the context's activity options, leaving everything
