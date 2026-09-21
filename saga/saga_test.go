@@ -505,7 +505,7 @@ func TestInlineStepSkipsAfterAFailedStep(t *testing.T) {
 // --- which error is reported -------------------------------------------------
 
 // maskWorkflow is the shape example/approval has without a guard on s.Err():
-// a step fails, AwaitSignal returns at once, and the body reports the missing
+// a step fails, the wait returns at once, and the body reports the missing
 // signal as the failure.
 func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 	var a *acts
@@ -536,7 +536,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 
 // A step's failure outranks an error the body produced afterwards. Without
 // this, a saga whose reservation failed reports "nobody reviewed the order in
-// time", because AwaitSignal returned at once and the body drew the obvious
+// time", because the wait returned at once and the body drew the obvious
 // conclusion from it.
 func TestFirstFailureWins(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite

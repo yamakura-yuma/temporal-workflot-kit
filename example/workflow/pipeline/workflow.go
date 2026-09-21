@@ -11,7 +11,7 @@
 // its forward half runs, so at registration time there is nothing to read; by
 // the time it runs, the field is filled. If the forward half never returned,
 // the field is empty, and the compensation has to fall back on the idempotency
-// key it sent -- see docs/activity-contract.md.
+// key it sent -- see docs/interface.md.
 package pipeline
 
 import (

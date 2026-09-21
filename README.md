@@ -49,8 +49,7 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
         ScheduleToCloseTimeout: time.Minute,   // 補償はこれが無いと無制限にリトライする
     })
 
-    return saga.RunOrCompensate(ctx, saga.Options{
-    }, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+    return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
         w := &fulfillment{in: in}
 
         s.Step(ctx, "reserve", w.reserve, w.unreserve)
@@ -74,21 +73,20 @@ func (w *fulfillment) refund(ctx workflow.Context) error {
 }
 ```
 
-`saga.Step` の戻り値を捨てているのは手抜きではありません。最初の失敗以降、後続の
-`saga.Step` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
+`s.Step` の戻り値を捨てているのは手抜きではありません。最初の失敗以降、後続の
+`s.Step` は何もせず、`RunOrCompensate` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
 外に出ません。
 
 振る舞いは `docs/specs/` に実行できる仕様として置いてあり、`just spec` が実際の Temporal
 dev server を起動して確かめます。
 
 ```
-## キャンセルされた saga もロールバックされる
-
-* 課金の後で待機する注文 "cancelme"
-* "charge" が実行されたら saga をキャンセルする
-* saga は失敗する
-* アクティビティ "Reserve, Charge, Refund, Unreserve" が実行された
-* 注文は "Reserve, Charge" を保持していない
+  シナリオ: キャンセルされた saga もロールバックされる
+    前提 課金の後で待機する注文 "cancelme"
+    もし "Charge" が実行されたら saga をキャンセルする
+    ならば saga は失敗する
+    かつ アクティビティ "Reserve, Charge, Refund, Unreserve" が実行された
+    かつ 注文は "Reserve, Charge" を保持していない
 ```
 
 ## 機能・特徴
@@ -144,9 +142,9 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 | 例 | 何を見せているか | 図 |
 | --- | --- | --- |
-| [`example/workflow/order/`](example/workflow/order/) | 基本形。3ステップと補償、冪等キーを呼び先に渡すアクティビティの書き方、巻き戻し失敗の検知 | [図](example/workflow/order/diagram.html) |
+| [`example/workflow/order/`](example/workflow/order/) | 基本形。3ステップと補償、巻き戻しが失敗したときの検知 | [図](example/workflow/order/diagram.html) |
 | [`example/workflow/pipeline/`](example/workflow/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/workflow/pipeline/diagram.html) |
-| [`example/workflow/state/`](example/workflow/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/workflow/state/diagram.html) |
+| [`example/workflow/state/`](example/workflow/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、本体を1ステップ1行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/workflow/state/diagram.html) |
 | [`example/workflow/childflow/`](example/workflow/childflow/) | forward を子ワークフロー、取り消しをアクティビティで実行するステップ。冪等キーを境界の向こうへ渡す | [図](example/workflow/childflow/diagram.html) |
 | [`example/workflow/approval/`](example/workflow/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/workflow/approval/diagram.html) |
 | [`example/workflow/external/`](example/workflow/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/workflow/external/diagram.html) |

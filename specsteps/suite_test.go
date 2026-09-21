@@ -2,9 +2,8 @@
 // are written in.
 //
 // The suite runs one Temporal dev server and one worker per example for the
-// whole run, started in TestMain. Scenarios are kept apart by using their own
-// order id, and by the fact that saga idempotency keys are scoped to a workflow
-// run.
+// whole run, started in TestMain. Scenarios are kept apart by giving each one
+// its own order id, and by each example having a task queue of its own.
 //
 // Everything here is _test.go. Nobody imports this package; it exists to be run.
 package specsteps
@@ -51,8 +50,8 @@ const specsDir = "../docs/specs"
 // lifetime, so they cannot be per-scenario. Handing them to each scenario
 // through its context is what keeps them out of package-level variables.
 //
-// Sharing them across examples is safe because an idempotency key carries the
-// workflow run id, so no two sagas can write the same one.
+// Sharing them across examples is safe because the activities hold no state:
+// they check a failure flag in their input and return an id built from it.
 type suite struct {
 	client client.Client
 	acts   *activity.Activities

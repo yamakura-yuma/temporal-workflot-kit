@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>state — Run の中を短く保つ — temporal-workflow-kit example</title>
+<title>state — saga の本体を短く保つ — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -77,7 +77,7 @@
 
 <nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="diagram.html" class="here">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>state — Run の中を短く保つ<span class="path">example/workflow/state/</span></h1>
+<h1>state — saga の本体を短く保つ<span class="path">example/workflow/state/</span></h1>
 <p>アクティビティの入力が増えると、ステップを並べただけのワークフローは読めなくなります。入力と各ステップの出力を1つの構造体に持たせ、ステップをそのメソッドにします。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
@@ -90,7 +90,7 @@
 <h2>コードの形</h2>
 <p>これだけは実行時の経路ではなく、<strong>書き方</strong>の話です。</p>
 <div class="strip">
-  <div class="lane"><span class="tag">Run の body</span><span class="note">2行</span></div>
+  <div class="lane"><span class="tag">RunOrCompensate の body</span><span class="note">1ステップ1行</span></div>
   <div class="row">
     <div class="cell f" style="flex:0 0 auto;padding:9px 18px">w := &amp;fulfillment{in: in}<span class="sub2">return w.run(ctx, s)</span></div>
     <div class="arr">→</div>
@@ -132,7 +132,7 @@
 
 <div class="note-box">
   <strong>同じ saga を素の形でも書いてあります。</strong>
-  <code>workflow_flat.go</code> は上と同じ5ステップを <code>saga.Run</code> の
+  <code>workflow_flat.go</code> は上と同じ5ステップを <code>RunOrCompensate</code> の
   クロージャに並べたもので、違うのは本体の書き方だけです。2つを並べて読むためのもので、
   仕様が両方を動かして同じ <code>Receipt</code> が返ることを確かめています。
 </div>

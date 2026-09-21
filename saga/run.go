@@ -15,10 +15,11 @@ import (
 //
 // The compensation phase runs on a disconnected context, so it still works when
 // the workflow itself is being canceled -- which is exactly when it matters.
-// Compensations run in reverse order of registration.
+// Compensations run in reverse order of registration, unless
+// Options.ParallelCompensation says otherwise.
 //
 // body returning a nil error is not enough to be treated as success: if any
-// step inside it failed, Run compensates and returns that error, discarding
+// step inside it failed, RunOrCompensate compensates and returns that error, discarding
 // body's return value. That is deliberate. With the sticky-error behaviour of
 // Step, a caller who forgets to check an error would otherwise return a
 // half-filled result and the workflow would be recorded as completed with its
@@ -28,7 +29,7 @@ import (
 // step has failed, later steps are no-ops and a wait returns at once, so
 // the body tends to reach a branch that reads a zero value and reports
 // something untrue -- "nobody approved this" when the truth is "the
-// reservation failed". Run reports the step's failure instead. Call s.ClearErr()
+// reservation failed". RunOrCompensate reports the step's failure instead. Call s.ClearErr()
 // before returning your own error if you have handled the step failure and
 // mean to replace it.
 //

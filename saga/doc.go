@@ -2,8 +2,9 @@
 //
 // A step is two ordinary workflow functions: the forward half, and the
 // compensation that undoes it. The library registers the compensation before
-// the forward half runs, and Run executes the registered compensations in
-// reverse order if the saga fails.
+// the forward half runs, and RunOrCompensate executes the registered
+// compensations if the saga fails -- in reverse order, or all at once if
+// Options.ParallelCompensation says so.
 //
 //	func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 //	    ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -66,7 +67,7 @@
 //
 // RunOrCompensate owns the rollback, so there is no compensate() to forget and
 // one place for the body to leave by. A step failure makes every later step a
-// no-op, and Run returns that error even if the body returned nil, discarding
+// no-op, and RunOrCompensate returns that error even if the body returned nil, discarding
 // the body's result: forgetting an error check fails the workflow instead of
 // completing it with half its side effects applied. A step's failure also
 // outranks an error the body produced afterwards, because once a step has
@@ -91,9 +92,10 @@
 // on the context before calling RunOrCompensate. StartToCloseTimeout alone
 // bounds one attempt and not the retries.
 //
-// Idempotency keys are yours. StepKey derives a value unique to one step of one
-// run; put it in the request you send, because only the service you call can
-// enforce it. Claiming it has to be atomic with doing the work: checking
+// Idempotency keys are yours, and this package neither builds nor passes one.
+// Derive a value unique to one step of one run -- the run id and the step name
+// will do -- and put it in the request you send, because only the service you
+// call can enforce it. Claiming it has to be atomic with doing the work: checking
 // whether the key was used and then acting is not enough, since a timeout can
 // put two attempts in flight at once and both will see it as unused. Use a
 // uniqueness constraint (INSERT ... ON CONFLICT) or the downstream API's own

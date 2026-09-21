@@ -13,8 +13,8 @@ Temporal のワークフローを書くための Go の部品集。今入って�
 
 ## レイアウト
 
-- `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`saga.Activity` が forward を1つ
-  実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
+- `saga/` — ライブラリ本体。`RunOrCompensate` がロールバックを所有し、`Step` が補償を
+  forward より先に登録する。ステップの両半分はただの `func(workflow.Context) error`。ユニットテストは Temporal のインメモリ環境で動く
 - `docs/` — ドキュメント。`design.md`（なぜこの形か）、`patterns.md`（よくある形と
   example への索引）、`interface.md`（アクティビティ側の契約と、塞げていない
   こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
@@ -41,15 +41,15 @@ Temporal のワークフローを書くための Go の部品集。今入って�
   `diagram.html` だけ。**1パッケージにまとめない**（`TaskQueue`、`Order`、`Receipt` が
   6組ぶつかって全部に接頭辞が要るため）
   - `order/` — 基本形の saga（reserve, charge, ship）。まずこれを読む
-  - `approval/` — signal 待ちを `saga.Func` でステップにする例。自前のアクティビティは
+  - `approval/` — signal 待ちをステップの forward にする例。自前のアクティビティは
     持たない
   - `pipeline/` — 前段の出力が次段の入力になる例。`ChargeReq.Reservation` を埋めるのが
     その主題で、埋めないのが `order/`
-  - `state/` — 大きな入力を state 構造体とメソッドで細い入力に射影し、`Run` の中を短く
+  - `state/` — 大きな入力を state 構造体とメソッドで細い入力に射影し、saga の本体を短く
     保つ例。5ステップ（うち1つは signal 待ち）あり、同じ saga を素の形で書いた
     `workflow_flat.go` を並べて置く。仕様が両方を動かして同じ結果になることを確かめる
-  - `childflow/` — ステップが子ワークフローの例（`saga.ChildWorkflow`）
-  - `external/` — signal で他のワークフローを動かす例（`saga.Func`）
+  - `childflow/` — forward を子ワークフロー、取り消しをアクティビティで実行する例
+  - `external/` — signal で他のワークフローを動かす例
 
 example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。
 ワークフローの入口は `workflow.go`。アクティビティを足すときは `example/activity/` に

@@ -100,7 +100,7 @@ func (w *fulfillment) unreserve(ctx workflow.Context) error {
 }
 
 // await waits for a reviewer and turns the answer into a result or an error.
-// Returning an error is the whole rollback trigger: Run releases the
+// Returning an error is the whole rollback trigger: RunOrCompensate releases the
 // reservation on the way out.
 //
 // What "nobody answered" means is decided here, the same way an activity

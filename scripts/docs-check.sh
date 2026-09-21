@@ -14,24 +14,28 @@ trap 'rm -f "$tmp"' EXIT
 #
 #    docs/design.md と docs/activity-contract.md は別の作業で書き換え中なので、
 #    いまは対象外。書き換えが終わったらこの除外を消すこと。
-gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc)\(|\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|KeyFunc|CompensationBudget|RemainingBudget|AwaitSignal)\b|\bsaga\.Run\(|\bsaga\.Step\('
+gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc|Run|Step|StepKey|AwaitSignal|IdempotencyKey|IdempotencyKeyOf|DefaultKey)\b|\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|KeyFunc|StepKey|CompensationBudget|RemainingBudget|AwaitSignal|StopOnCompensationError|InlineStep|undoSuffix|withActivityID|stepKey|activity-contract)\b'
 
-grep -rnE "$gone" docs .apm README.md \
+# ドキュメント。design.md の「意図して手放したもの」より下だけは、消した API を名指しで
+# 説明しているので別扱いにする。
+grep -rnE "$gone" docs .apm README.md CLAUDE.md \
   | grep -v '^docs/design\.md:' > "$tmp" || true
 
-# docs/design.md は「意図して手放したもの」の節で、消した API を名指しで説明している。
-# そこは腐りではなく履歴なので、見出しより上だけを見る。
 sed -n '1,/^# 意図して手放したもの/p' docs/design.md \
   | grep -nE "$gone" \
   | sed 's|^|docs/design.md:|' >> "$tmp" || true
 
-# saga/*.go のコメントも同じ腐り方をする。ここは prefix が付かないので別の綴りで見る。
-grep -rnE '\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|runUndo|stepID)\b' \
-  saga/*.go >> "$tmp" || true
+# コードとその図。ここを見ていなかったので腐りが溜まっていた。
+grep -rnE "$gone" saga example specsteps --include='*.go' --include='*.html' >> "$tmp" || true
+
+# 改名し損ねた Run。RunOrCompensate・RunID・WorkflowRun には当たらない。
+grep -rnE '\bRun\b' saga example specsteps docs README.md CLAUDE.md \
+     --include='*.go' --include='*.md' --include='*.html' --include='*.feature' \
+  | grep -vE 'RunOrCompensate|RunID|WorkflowRun|\.Run\(|func Run|TestRun' >> "$tmp" || true
 
 if [ -s "$tmp" ]; then
-  echo "消した API がドキュメントに残っている（ステップの両半分は" >&2
-  echo "func(workflow.Context) error、冪等キーは saga.StepKey）:" >&2
+  echo "消した API がドキュメント・コメントに残っている。" >&2
+  echo "ステップの両半分は func(workflow.Context) error、冪等キーは利用者が作る:" >&2
   cat "$tmp" >&2
   fail=1
 fi

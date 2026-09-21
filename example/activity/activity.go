@@ -16,12 +16,12 @@
 // The record of what was done belongs to that downstream, not to the type
 // below, which is why there is nothing here to keep it in.
 //
-// The consequence is that nothing here reads the idempotency key, because there
-// is nothing to hand it to. docs/interface.md has the shape a real one
-// takes -- the key as a UNIQUE column, or an Idempotency-Key header -- and
-// saga.IdempotencyKey is how an activity reads it. What the specifications
-// check instead is the workflow history, which is Temporal's own record of what
-// each activity was handed and what came back.
+// The consequence is that nothing here reads an idempotency key, because there
+// is nothing to hand it to. A real activity takes it out of its own request --
+// the workflow put it there -- and hands it to the service it calls, as a
+// UNIQUE column or an Idempotency-Key header. docs/interface.md has the shape.
+// What the specifications check instead is the workflow history, which is
+// Temporal's own record of what each activity was handed and what came back.
 package activity
 
 // Order is the order as an activity sees it. A workflow whose input needs

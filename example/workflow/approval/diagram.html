@@ -113,15 +113,15 @@
 
 <p><strong>本体はステップの列のまま。</strong>待つ処理も1行です。</p>
 
-<pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
-saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, order.ChargeReq{Order: in.Order})</code></pre>
+<pre><code>s.Step(ctx, "reserve", w.reserve, w.unreserve)
+s.Step(ctx, "approval", w.await, nil)          // 取り消すものが無いので nil
+s.Step(ctx, "charge", w.chargeCard, w.refund)</code></pre>
 
 <p>判断は利用者が書いた関数の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
 関数の中に閉じ込めるのと、同じ立ち位置です。</p>
 
 <pre><code>func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
-    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+    decision, ok := awaitDecision(ctx, w.wait())   // 素の Selector。自分で書く
     if !ok {
         return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
     }

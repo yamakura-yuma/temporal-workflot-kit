@@ -38,7 +38,7 @@ import "go.temporal.io/sdk/workflow"
 // succeed when it finds nothing to do.
 //
 // After any step fails, later Step calls return that error without running
-// anything, so a linear saga can ignore the returned error and let Run decide
+// anything, so a linear saga can ignore the returned error and let RunOrCompensate decide
 // the outcome.
 //
 // undo may be nil for a step with nothing to take back.

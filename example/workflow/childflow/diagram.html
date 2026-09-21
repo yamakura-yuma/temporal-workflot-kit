@@ -112,13 +112,13 @@
 <table>
   <tr><th></th><th>実行</th><th>冪等キーを載せる場所</th><th>予算で切る対象</th></tr>
   <tr>
-    <td><strong>アクティビティ</strong><br><code>saga.Activity</code></td>
+    <td><strong>アクティビティ</strong><br><code>ExecuteActivity</code></td>
     <td><code>ExecuteActivity</code></td>
     <td><code>ActivityOptions.ActivityID</code></td>
     <td><code>ScheduleToCloseTimeout</code></td>
   </tr>
   <tr>
-    <td><strong>子ワークフロー</strong><br><code>saga.ChildWorkflow</code></td>
+    <td><strong>子ワークフロー</strong><br><code>ExecuteChildWorkflow</code></td>
     <td><code>ExecuteChildWorkflow</code></td>
     <td><code>ChildWorkflowOptions.WorkflowID</code></td>
     <td><code>WorkflowExecutionTimeout</code></td>
@@ -134,16 +134,24 @@
 <div class="note-box">
   <strong>forward と補償は別々に選べます。</strong> 梱包は履歴を持つ価値があるので子
   ワークフロー、取り消しはアクティビティ1本。<strong>実行の仕方が違っても両者は同じ
-  冪等キーを見ます</strong> — 子は <code>IdempotencyKeyOf</code> で
-  <code>WorkflowID</code> から、アクティビティは <code>IdempotencyKey</code> で
-  <code>ActivityID</code> から読み、<code>:undo</code> は剥がされた後なので同じ値です。
+  冪等キーを受け取ります</strong> — ワークフローが <code>packKey</code> で1回導出し、
+  子のリクエストにもアクティビティのリクエストにも同じ文字列を入れているからです。
+  ライブラリは関与しません。
 </div>
 
-<pre><code>res,  _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-pack, _ := saga.Step(ctx, s, "pack",
-    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
-//  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   ~~~~~~~~~~~~~~~~~~~~~~~~~
-//  子ワークフローで実行し             アクティビティで取り消す</code></pre>
+<pre><code>s.Step(ctx, "reserve", w.reserve, w.unreserve)
+s.Step(ctx, "pack", w.pack, w.unpack)     // pack は子ワークフロー、unpack はアクティビティ
+
+func (w *fulfillment) pack(ctx workflow.Context) error {   // 子ワークフローで実行し
+    ctx = workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: w.packKey})
+    return workflow.ExecuteChildWorkflow(ctx, PackWorkflow,
+        activity.PackReq{Order: w.in, Key: w.packKey}).Get(ctx, &amp;w.packing)
+}
+
+func (w *fulfillment) unpack(ctx workflow.Context) error {  // アクティビティで取り消す
+    return workflow.ExecuteActivity(ctx, acts.Unpack,
+        activity.PackReq{Order: w.in, Key: w.packKey, Pack: w.packing}).Get(ctx, nil)
+}</code></pre>
 
 <div class="spec"><b>## 子ワークフローのステップも逆順で取り消される</b>
 

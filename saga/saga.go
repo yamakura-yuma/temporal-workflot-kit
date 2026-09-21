@@ -1,9 +1,15 @@
 package saga
 
-// This file is the part that matches the Java SDK's io.temporal.workflow.Saga
-// and the PHP port of it: a list of compensations run in reverse order, with
-// the same two options under the same names. run.go and step.go are what this
-// package adds on top; doc.go says why.
+// The compensation list, the reverse order and the two Options are what the
+// Java SDK's io.temporal.workflow.Saga and the PHP port of it have, under the
+// same names. run.go and step.go hold the rest of what this package adds.
+//
+// Two extensions are in here rather than there, because they are inside
+// compensate() and splitting that function would hide more than it showed: the
+// disconnected context, which PHP has as asyncDetached and Java does not have
+// at all, and the failed/skipped accounting that fills CompensationReport.
+// Step names, and the claimName that keeps them unique, are here for the same
+// reason -- Java's Saga has no step names.
 
 import (
 	"fmt"
@@ -37,7 +43,8 @@ type Options struct {
 }
 
 // Saga records the compensations for the steps that have been started, and the
-// first error any of them reported. Create one with Run.
+// first error any of them reported. RunOrCompensate creates one and hands it
+// to the body; there is no other way to get one.
 type Saga struct {
 	opts  Options
 	err   error
@@ -75,7 +82,7 @@ func (s *Saga) claimName(name string) error {
 		return fmt.Errorf("saga: step name must not be empty")
 	}
 	if _, taken := s.names[name]; taken {
-		return fmt.Errorf("saga: duplicate step name %q; names identify a step's idempotency key and must be unique", name)
+		return fmt.Errorf("saga: duplicate step name %q; names identify a step in CompensationReport and must be unique", name)
 	}
 	s.names[name] = struct{}{}
 	return nil

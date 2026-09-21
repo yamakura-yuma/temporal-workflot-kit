@@ -76,14 +76,14 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 		w := &fulfillment{in: in.Order}
 
 		// The step errors are ignored on purpose: after the first failure every
-		// later Step is a no-op, and Run fails the workflow with that error
+		// later Step is a no-op, and RunOrCompensate fails the workflow with that
 		// rather than returning the half-filled Receipt this body would
 		// otherwise produce.
 		s.Step(ctx, "reserve", w.reserve, w.unreserve)
 		s.Step(ctx, "charge", w.chargeCard, w.refund)
 
 		// Somewhere to cancel the workflow from the outside. Sleep returns a
-		// cancellation error, which Run turns into a rollback -- on a
+		// cancellation error, which RunOrCompensate turns into a rollback -- on a
 		// disconnected context, or every compensation below would fail
 		// immediately instead.
 		if in.HoldSeconds > 0 && s.Err() == nil {

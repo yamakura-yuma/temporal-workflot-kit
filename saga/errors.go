@@ -22,8 +22,10 @@ const CompensationFailedType = "CompensationFailed"
 type CompensationReport struct {
 	// Failed lists steps whose compensation ran and returned an error.
 	Failed []string `json:"failed"`
-	// Skipped lists steps whose compensation never ran because
-	// StopOnCompensationError was set and an earlier one failed.
+	// Skipped lists steps whose compensation never ran: an earlier one failed
+	// and Options.ContinueWithError was not set. It is always empty under
+	// ParallelCompensation, where every compensation is dispatched before any
+	// of them is awaited.
 	Skipped []string `json:"skipped"`
 }
 

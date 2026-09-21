@@ -9,8 +9,8 @@
 | 知りたいこと | 答え | 実物 | 図 |
 | --- | --- | --- | --- |
 | ステップはアクティビティに限るのか | 限らない。関数の中に何を書くかで決まる | [`example/workflow/childflow/`](../example/workflow/childflow/) | [図](../example/workflow/childflow/diagram.html) |
-| アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/workflow/pipeline/`](../example/workflow/pipeline/) | [図](../example/workflow/pipeline/diagram.html) |
-| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行。素の形との読み比べは [`workflow_flat.go`](../example/workflow/state/workflow_flat.go) | [`example/workflow/state/`](../example/workflow/state/) | [図](../example/workflow/state/diagram.html) |
+| アクティビティの結果を次のステップに渡せるか | 渡せる。補償は forward が書いたフィールドを読む | [`example/workflow/pipeline/`](../example/workflow/pipeline/) | [図](../example/workflow/pipeline/diagram.html) |
+| saga の本体が長くなるのをどうするか | state 構造体とメソッドに割る。本体は1ステップ1行。素の形との読み比べは [`workflow_flat.go`](../example/workflow/state/workflow_flat.go) | [`example/workflow/state/`](../example/workflow/state/) | [図](../example/workflow/state/diagram.html) |
 | signal を待つには | 待つ関数をステップの forward にする。判断はその中 | [`example/workflow/approval/`](../example/workflow/approval/) | [図](../example/workflow/approval/diagram.html) |
 | signal を送るステップは書けるか | 書ける。ただし冪等キーは載らない | [`example/workflow/external/`](../example/workflow/external/) | [図](../example/workflow/external/diagram.html) |
 | 基本形 | 3ステップと補償、巻き戻しが失敗したときの検知 | [`example/workflow/order/`](../example/workflow/order/) | [図](../example/workflow/order/diagram.html) |
@@ -19,7 +19,7 @@
 
 ## ステップの半分は、ただのワークフローコード
 
-`saga.Step` が取るのは、**forward と補償の2つの関数**だけです。どちらも
+`s.Step` が取るのは、**forward と補償の2つの関数**だけです。どちらも
 `func(workflow.Context) error` で、中身は普通のワークフローコードです。
 
 ```go
@@ -161,9 +161,9 @@ func (w *fulfillment) refund(ctx workflow.Context) error {
 出力は履歴に残らず、補償は空の値を見ます。そこを埋めるのが冪等キーで、「このキーで書かれた
 行を消す」という形なら、forward が成功していようと途中で落ちていようと同じ1文で足ります。
 
-## `Run` の中を短く保つ
+## saga の本体を短く保つ
 
-両半分をメソッドにすると、`Run` に渡すクロージャは**1ステップ1行**になります。
+両半分をメソッドにすると、`RunOrCompensate` に渡すクロージャは**1ステップ1行**になります。
 
 ```go
 return saga.RunOrCompensate(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
@@ -211,7 +211,7 @@ s.Step(ctx, "reserve",
 （その場）で書いてあり、仕様（[`state.feature`](specs/state.feature)）が両方を動かして同じ
 `Receipt` が返ることを確かめています。どちらが読みやすいかは、並べて読んで決めてください。
 
-クロージャ自体は無くせません。`Run` が最後にロールバックを判断する場所だからです。
+クロージャ自体は無くせません。`RunOrCompensate` が最後にロールバックを判断する場所だからです。
 `defer` を利用者に書かせる形は、書き忘れると補償ゼロのまま「成功」になるので採っていません
 （[design.md](design.md) の項目4）。
 
@@ -249,7 +249,7 @@ saga が人の承認を1時間待って止まることはありません。こ�
 理由です。
 
 **`s.Err()` のガードは要りません。** ステップが失敗していれば以降のステップは飛ばされ、
-`Run` は**最初の失敗**を報告します。握って自分のエラーを返したいときだけ、先に
+`RunOrCompensate` は**最初の失敗**を報告します。握って自分のエラーを返したいときだけ、先に
 `s.ClearErr()` を呼んでください。
 
 ただし**ライブラリが面倒を見られるのはステップの中だけ**です。`s.Err()` が立った後も、
