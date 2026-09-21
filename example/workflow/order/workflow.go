@@ -1,8 +1,12 @@
-// Package order is the basic saga: three activity steps, each with a
-// compensation, undone in reverse when anything fails.
+// Package order is the basic saga: three steps, each with a compensation,
+// undone in reverse when anything fails.
 //
 // Read this one first. The other workflows under example/workflow/ are variants
 // of it, and they all call the same activities from example/activity/.
+//
+// Each half of a step is an ordinary method that runs an activity and puts the
+// result on the struct. The library never wraps workflow.ExecuteActivity, so
+// what you see is what Temporal does.
 package order
 
 import (
@@ -23,6 +27,10 @@ const TaskQueue = "saga-integration"
 // registered on the server before a workflow can write it; the test harness
 // registers it on the dev server it starts.
 var CompensationFailedAttribute = temporal.NewSearchAttributeKeyBool("SagaCompensationFailed")
+
+// acts is a nil receiver. Only the names of its methods are used, to tell
+// ExecuteActivity which activity to run.
+var acts *activity.Activities
 
 // Request is the workflow input: an order, plus the two knobs that belong to
 // this workflow rather than to any activity.
@@ -46,35 +54,28 @@ type Receipt struct {
 
 // OrderWorkflow reserves stock, charges the card and books a shipment. If any
 // step fails, the steps that already ran are undone in reverse order.
-//
-// The step errors are ignored on purpose: after the first failure every later
-// Step is a no-op, and Run fails the workflow with that error rather than
-// returning the half-filled Receipt this body would otherwise produce.
 func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
-	var a *activity.Activities // nil receiver: only the methods' names are used
+	// Ordinary activity options, set the ordinary way. Every step below runs
+	// under them; a step that wants its own says so inside its own method.
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
 
-	opts := saga.Options{
-		ActivityOptions: workflow.ActivityOptions{
-			StartToCloseTimeout: 10 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-		},
-		CompensationOptions: workflow.ActivityOptions{
-			StartToCloseTimeout: 30 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-		},
-		CompensationBudget: time.Minute,
-	}
+	opts := saga.Options{CompensationBudget: time.Minute}
 	if in.MarkAttribute {
 		opts.CompensationFailedAttribute = &CompensationFailedAttribute
 	}
 
 	return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		// Nothing is fed from one step to the next here: every request is built
-		// from the input alone. ChargeReq and ShipReq have fields for the
-		// upstream ids and this saga leaves them empty. For the shape that
-		// fills them, see example/workflow/pipeline.
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), activity.ReserveReq{Order: in.Order})
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), activity.ChargeReq{Order: in.Order})
+		w := &fulfillment{in: in.Order}
+
+		// The step errors are ignored on purpose: after the first failure every
+		// later Step is a no-op, and Run fails the workflow with that error
+		// rather than returning the half-filled Receipt this body would
+		// otherwise produce.
+		saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+		saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
 
 		// Somewhere to cancel the workflow from the outside. Sleep returns a
 		// cancellation error, which Run turns into a rollback -- on a
@@ -86,8 +87,48 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 			}
 		}
 
-		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), activity.ShipReq{Order: in.Order})
+		saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
 
-		return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
+		return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
 	})
+}
+
+// fulfillment holds the input and what each step produced. A compensation reads
+// what its forward half wrote, which is why the two are methods on one struct.
+type fulfillment struct {
+	in activity.Order
+
+	reservation string
+	charge      string
+	shipment    string
+}
+
+func (w *fulfillment) reserve(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Reserve,
+		activity.ReserveReq{Order: w.in}).Get(ctx, &w.reservation)
+}
+
+func (w *fulfillment) unreserve(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Unreserve,
+		activity.ReserveReq{Order: w.in}).Get(ctx, nil)
+}
+
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Charge,
+		activity.ChargeReq{Order: w.in}).Get(ctx, &w.charge)
+}
+
+func (w *fulfillment) refund(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Refund,
+		activity.ChargeReq{Order: w.in, Charge: w.charge}).Get(ctx, nil)
+}
+
+func (w *fulfillment) ship(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Ship,
+		activity.ShipReq{Order: w.in}).Get(ctx, &w.shipment)
+}
+
+func (w *fulfillment) cancelShipment(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.CancelShipment,
+		activity.ShipReq{Order: w.in, Shipment: w.shipment}).Get(ctx, nil)
 }

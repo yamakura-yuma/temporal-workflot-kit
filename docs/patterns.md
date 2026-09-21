@@ -17,133 +17,140 @@
 
 ---
 
-## ステップの種類を選ぶ
+## ステップの半分は、ただのワークフローコード
 
-`saga.Step` は1つだけで、**何で実行するかは渡す値が決めます**。
-
-```go
-// アクティビティのステップ
-res, _ := saga.Step(ctx, s, "reserve",
-    saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
-
-// 子ワークフローで実行し、アクティビティで取り消すステップ
-pack, _ := saga.Step(ctx, s, "pack",
-    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
-
-// 外部ワークフローへの signal のステップ
-saga.Step(ctx, s, "hold",
-    saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{SKU: in.SKU})
-
-// 自分のワークフローコードのステップ
-saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
-```
-
-混ぜられます。補償のレジストリは executor を区別しないので、巻き戻しは1つの逆順で回ります。
-
-**forward と補償は別々の値なので、片方だけ別の executor にできます。** 上の例は
-`example/workflow/childflow/` そのもので、荷造りは自分の履歴を持つに足る長さなので子ワークフロー、
-荷ほどきはアクティビティ1回です。
-
-子ワークフロー側は `saga.IdempotencyKeyOf` で自分の鍵を読みます。鍵は子の `WorkflowID` に
-載っていて、補償側の `:undo` は剥がされた後なので、両側で同じ値になります。アクティビティ側は
-`saga.IdempotencyKey` で、同じ値を読みます。
+`saga.Step` が取るのは、**forward と補償の2つの関数**だけです。どちらも
+`func(workflow.Context) error` で、中身は普通のワークフローコードです。
 
 ```go
-func PackWorkflow(ctx workflow.Context, req PackReq) (string, error) {
-    key, _ := saga.IdempotencyKeyOf(ctx)   // 子ワークフロー側
-    ...
-}
+saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
 
-func (a *Activities) Unpack(ctx context.Context, req PackReq) error {
-    key, _ := saga.IdempotencyKey(ctx)     // アクティビティ側。同じ値
-    ...
+func (w *fulfillment) reserve(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Reserve, ReserveReq{Order: w.in}).Get(ctx, &w.reservation)
 }
 ```
 
-タスクキュー、タイムアウト、リトライポリシーといった子の設定は context から取ります。
-呼ぶ前に `workflow.WithChildOptions` で普通に設定してください。補償の子の
-`WorkflowExecutionTimeout` だけは、補償予算の残りに切り詰められます。
-
-**ローカルアクティビティは対象外です。** `LocalActivityOptions` に ID フィールドが無く、
-冪等キーを載せる場所がありません。そもそもローカルアクティビティはリトライがワークフロー
-タスク内で完結してサーバに残らないので、取り消しが要るような副作用を置く場所ではない、
-というのもあります。
-
-## アクティビティの結果を次のステップに渡す
-
-渡せます。前段の出力を次段のリクエストに入れるだけ。
+**ライブラリは `ExecuteActivity` を包みません。** だから何で実行するかは、関数の中に何を
+書くかの違いでしかありません。
 
 ```go
-res, _ := saga.Step(ctx, s, "reserve",
-    saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
-chg, _ := saga.Step(ctx, s, "charge",
-    saga.Activity(a.Charge), saga.UndoActivity(a.Refund),
-    ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
+// アクティビティ
+workflow.ExecuteActivity(ctx, acts.Reserve, req).Get(ctx, &w.reservation)
+
+// 子ワークフロー
+workflow.ExecuteChildWorkflow(ctx, PackWorkflow, req).Get(ctx, &w.packing)
+
+// 他のワークフローへの signal
+workflow.SignalExternalWorkflow(ctx, id, "", HoldSignal, req).Get(ctx, nil)
+
+// 何も実行しない。signal を待つだけ
+saga.AwaitSignal[Decision](ctx, ApprovalSignal, wait)
 ```
 
-**補償はそのステップ自身の出力を見られません。** 補償はステップの実行より前に登録される
-ので、その時点では出力が存在しないからです。代わりに補償は forward と同じ入力を受け取り
-ます。つまり前段までの出力は手元にあります。
+**forward と補償で別々にしてかまいません。** `example/workflow/childflow/` は荷造りを子
+ワークフローで実行し、荷ほどきをアクティビティ1本でやっています。補償のレジストリは
+関数を持っているだけなので、巻き戻しは1つの逆順で回ります。
+
+タイムアウトもリトライポリシーもタスクキューも、**普通に context に載せてください**。
+ライブラリは奪いません。
 
 ```go
-// ChargeReq を受け取るので、どの予約に対する課金かが分かる
-func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
-    // req.Reservation が使える
+ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+    StartToCloseTimeout: 10 * time.Second,
+    RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+})
+```
+
+**ローカルアクティビティも書けます。** ただし取り消しが要る副作用を置く場所ではありません。
+リトライがワークフロータスク内で完結してサーバに残らないためです。
+
+### 冪等キー
+
+ライブラリは冪等キーを渡しません。`saga.StepKey(ctx, "charge")` が「1回の実行の1ステップ」に
+固有の文字列を返すので、**自分でリクエストに入れてください**。下流がそれで重複を弾きます。
+
+```go
+req := ChargeReq{Order: w.in, IdemKey: saga.StepKey(ctx, "charge")}
+```
+
+キーを原子的に押さえるのは下流の仕事で、ライブラリにはできません。詳しくは
+[activity-contract.md](activity-contract.md)。
+
+## 前のステップの結果を次のステップや補償で使う
+
+両半分を同じ構造体のメソッドにすると、**フィールドを読むだけ**です。
+
+```go
+type fulfillment struct {
+    in          Order
+    reservation string
+    charge      string
+}
+
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Charge,
+        ChargeReq{Order: w.in, Reservation: w.reservation}).Get(ctx, &w.charge)   // ← 前段の出力
+}
+
+func (w *fulfillment) refund(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Refund,
+        ChargeReq{Order: w.in, Charge: w.charge}).Get(ctx, nil)                   // ← 自分の forward の出力
 }
 ```
 
-自分のステップの出力が補償に必要な場合は、冪等キーで引いてください。それが
-`saga.IdempotencyKey` がある理由です。
+**補償が自分の forward の出力を使えます。** 補償は forward より先に登録されますが、
+*実行される*のは後なので、その時点でフィールドは埋まっています。他の saga 実装が補償ログと
+して明示的に持ち回るものを、Go では普通の変数がやります。
+
+**ただし forward が返さなかったときは空です。** 下流に書き込んだ直後にタイムアウトすると、
+出力は履歴に残らず、補償は空の値を見ます。そこを埋めるのが冪等キーで、「このキーで書かれた
+行を消す」という形なら、forward が成功していようと途中で落ちていようと同じ1文で足ります。
 
 ## `Run` の中を短く保つ
 
-アクティビティの入力が増えると、ステップを並べただけのワークフローは読めなくなります。
-入力と各ステップの出力を1つの構造体に持たせ、ステップをメソッドにすると、`Run` に渡す
-クロージャは2行になります。
-
-### いつ切り替えるか
-
-次のどれかに当たったら state 形にします。
-
-- ステップが4つ以上ある
-- 同じ入力を3つ以上のステップで使い回す
-- 前段の出力を2段以上先のステップへ渡す
-
-どれにも当たらないなら素の形（[`example/workflow/order/`](../example/workflow/order/)）のままでよく、
-state 形にしても構造体とメソッドの分だけ間接が増えます。
+両半分をメソッドにすると、`Run` に渡すクロージャは**1ステップ1行**になります。
 
 ```go
 return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
     w := &fulfillment{in: in}
-    return w.run(ctx, s)
+
+    saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+    saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
+    saga.Step(ctx, s, "approve", w.approve, nil)
+    saga.Step(ctx, s, "pack", w.pack, w.unpack)
+    saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+
+    return w.receipt(), nil
 })
-
-func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-    w.reserve(ctx, s)
-    w.chargeCard(ctx, s)
-    w.approve(ctx, s)
-    w.pack(ctx, s)
-    w.ship(ctx, s)
-
-    if err := s.Err(); err != nil {
-        return Receipt{}, err
-    }
-    return Receipt{Reservation: w.reservation, Charge: w.charge, ApprovedBy: w.approvedBy,
-        Pack: w.packing, Shipment: w.shipment}, nil
-}
 ```
 
-`saga.Step` が `ctx` と `s` を引数で取るので、ステップはメソッドでも関数でも好きに割れます。
+ここだけ読めば、何が何の順で起きて、どれが取り消せるかが分かります。`ExecuteActivity` も
+リクエストの組み立ても、各メソッドの中です。
 
-同じ saga を素の形で書いたものが [`example/workflow/state/workflow_flat.go`](../example/workflow/state/workflow_flat.go)
-にあります。入力も5ステップも同じで、違うのは本体の書き方だけなので、2つを並べて読めば
-上の閾値が実物として見えます。どちらが読みやすいかは読者が決めてください。仕様
-（[`state.feature`](specs/state.feature)）は両方を動かして同じ `Receipt` が返ることを
-確かめているので、片方だけ直されて食い違うことはありません。
+### 半分をその場に書く形と、どちらがよいか
 
-**state 構造体そのものを `saga.Step` に渡すことはできません。** アクティビティのステップでは
-`in` がそのままアクティビティの引数になるので、シリアライズ可能である必要があります。メソッドの中で state からリクエストを
-組んでください。
+小さい saga なら、その場に書いても読めます。
+
+```go
+saga.Step(ctx, s, "reserve",
+    func(ctx workflow.Context) error {
+        return workflow.ExecuteActivity(ctx, acts.Reserve, req).Get(ctx, &reservation)
+    },
+    func(ctx workflow.Context) error {
+        return workflow.ExecuteActivity(ctx, acts.Unreserve, req).Get(ctx, nil)
+    })
+```
+
+次のどれかに当たったらメソッドに割ってください。
+
+- ステップが4つ以上ある
+- 同じ入力を3つ以上のステップで使い回す
+- 前段の出力を2段以上先のステップや補償へ渡す
+
+実物が [`example/workflow/state/`](../example/workflow/state/) にあります。同じ saga が
+`workflow.go`（メソッド）と [`workflow_flat.go`](../example/workflow/state/workflow_flat.go)
+（その場）で書いてあり、仕様（[`state.feature`](specs/state.feature)）が両方を動かして同じ
+`Receipt` が返ることを確かめています。どちらが読みやすいかは、並べて読んで決めてください。
 
 クロージャ自体は無くせません。`Run` が最後にロールバックを判断する場所だからです。
 `defer` を利用者に書かせる形は、書き忘れると補償ゼロのまま「成功」になるので採っていません
@@ -151,44 +158,30 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 
 ## signal を待つ
 
-待つ処理も**ステップにします**。`saga.Func` が、利用者の書いたワークフローコードを
-その場で呼んでステップに変えます。
+待つ処理も**ステップにします**。半分はただの関数なので、`AwaitSignal` を呼んで判断するだけです。
 
 ```go
-saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
-```
+saga.Step(ctx, s, "approval", w.await, nil)   // 待ったことに取り消しは無いので nil
 
-判断は `awaitApproval` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
-関数の中に閉じ込めるのと、同じ立ち位置です。
-
-```go
-func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
-    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+func (w *fulfillment) await(ctx workflow.Context) error {
+    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, w.wait())
     if !ok {
-        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+        return temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
     }
     if !decision.Approved {
-        return Decision{}, temporal.NewApplicationError("rejected by "+decision.By, DeniedType, nil)
+        return temporal.NewApplicationError("rejected by "+decision.By, DeniedType, nil)
     }
-    return decision, nil
+    w.approvedBy = decision.By
+    return nil
 }
 ```
 
+判断は `await` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を関数の中に
+閉じ込めるのと同じ立ち位置です。
+
 ステップなので、**先のステップが失敗していれば飛ばされます**。ロールバックに向かっている
-saga が人の承認を1時間待って止まることはありません。
-
-`saga.Func` は signal 専用ではありません。ワークフローの中で実行する必要があって、かつ
-saga を失敗させうるもの全般に使えます。`workflow.Await` で条件を待つ、経路を選ぶ、など。
-
-本体はステップの列のままになります。
-
-```go
-res, _ := saga.Step(ctx, s, "reserve",
-    saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
-saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
-chg, _ := saga.Step(ctx, s, "charge",
-    saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in})
-```
+saga が人の承認を1時間待って止まることはありません。これが「待つだけの処理をステップにする」
+理由です。
 
 **`s.Err()` のガードは要りません。** ステップが失敗していれば以降のステップは飛ばされ、
 `Run` は**最初の失敗**を報告します。握って自分のエラーを返したいときだけ、先に
@@ -203,27 +196,21 @@ chg, _ := saga.Step(ctx, s, "charge",
 
 ## signal を送るステップ
 
-他のワークフローが持っている状態を動かすステップは `saga.Func` で書けます。補償は
-打ち消しの signal です。
+他のワークフローが持っている状態を動かすステップも、同じ形です。補償は打ち消しの signal。
 
 ```go
-saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease),
-    HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+saga.Step(ctx, s, "hold", w.hold, w.release)
 
-// 2つとも普通のワークフローコード。Func / UndoFunc に渡せるのはこれで足りる
-func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
-    err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
-    return struct{}{}, err
+func (w *fulfillment) hold(ctx workflow.Context) error {
+    return workflow.SignalExternalWorkflow(ctx, w.in.Inventory, "", HoldSignal, w.req()).Get(ctx, nil)
 }
 
-func sendRelease(ctx workflow.Context, req HoldReq) error {
-    return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
+func (w *fulfillment) release(ctx workflow.Context) error {
+    return workflow.SignalExternalWorkflow(ctx, w.in.Inventory, "", ReleaseSignal, w.req()).Get(ctx, nil)
 }
 ```
 
-補償は forward と同じ payload を受け取るので、押さえた分だけを正確に戻せます。
+補償は forward と同じ payload を送れるので、押さえた分だけを正確に戻せます。
 
-**専用の値は用意していません。** `SignalExternalWorkflow` には options 構造体が無いので、
-ライブラリが載せられる冪等キーも、切れる予算もありません。専用にしても `saga.Func` に
-語彙を足すだけになります。saga が保証するのは対になっていることだけで、同じ signal を
-2回受けても壊れないようにするのは受け手の責任です。
+**signal に冪等キーは載りません。** 同じ signal を2回受けても壊れないようにするのは受け手の
+責任です。saga が保証するのは、対になっていることだけです。

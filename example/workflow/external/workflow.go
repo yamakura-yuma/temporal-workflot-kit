@@ -5,15 +5,14 @@
 // the saga tells it to hold, then tells it to release again if a later step
 // fails.
 //
-// Sending a signal is written with saga.Func rather than a constructor of its
-// own: SignalExternalWorkflow has no options struct, so the library has no
-// idempotency key to put on it and no timeout to clamp, which is exactly what a
-// dedicated constructor would have been for. What the saga still guarantees is
-// the pairing -- if the saga fails after the hold was sent, the release is
-// sent.
+// The step's halves send the signals directly. There is nothing to wrap and
+// nothing special to declare -- a step is two workflow functions, and
+// SignalExternalWorkflow is what these two happen to call. What the saga
+// guarantees is only the pairing: if the saga fails after the hold was sent,
+// the release is sent.
 //
-// The charge step is one of the shared activities from example/activity/, and
-// it is only here so the saga has something to fail at after the hold.
+// A signal carries no idempotency key, and the receiver is responsible for
+// tolerating a repeat.
 package external
 
 import (
@@ -36,7 +35,9 @@ const (
 	HeldQuery     = "held"
 )
 
-// HoldReq is the payload of both signals. The compensation is handed the same
+var acts *activity.Activities
+
+// HoldReq is the payload of both signals. The compensation sends the same
 // value the forward step sent, so the release names exactly what was held.
 type HoldReq struct {
 	// Inventory is the workflow id to signal.
@@ -44,17 +45,6 @@ type HoldReq struct {
 	Order     string `json:"order"`
 	SKU       string `json:"sku"`
 	Quantity  int    `json:"quantity"`
-}
-
-// sendHold and sendRelease are the two halves of the hold step. They are
-// ordinary workflow code, which is all a Func step needs.
-func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
-	err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
-	return struct{}{}, err
-}
-
-func sendRelease(ctx workflow.Context, req HoldReq) error {
-	return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
 }
 
 // Request is the saga's input.
@@ -70,26 +60,55 @@ type Receipt struct {
 }
 
 // ExternalWorkflow holds stock in another workflow, then charges. If the charge
-// fails, the hold is released by the signal registered alongside it.
+// fails, the hold is released by the compensation registered alongside it.
 func ExternalWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
-	var a *activity.Activities
-
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions: workflow.ActivityOptions{
-			StartToCloseTimeout: 10 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-		},
-		CompensationBudget: time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		// Sending a signal is a Func step: the library has no key to put on it
-		// and no timeout to clamp, so a constructor of its own would be this
-		// with extra vocabulary.
-		saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{Inventory: in.Inventory, Order: in.Order.ID, SKU: in.Order.SKU, Quantity: in.Order.Quantity})
-
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), activity.ChargeReq{Order: in.Order})
-
-		return Receipt{Charge: chg}, nil
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
+
+	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+			w := &fulfillment{in: in}
+
+			saga.Step(ctx, s, "hold", w.hold, w.release)
+			saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
+
+			return Receipt{Charge: w.charge}, nil
+		})
+}
+
+type fulfillment struct {
+	in Request
+
+	charge string
+}
+
+func (w *fulfillment) req() HoldReq {
+	return HoldReq{
+		Inventory: w.in.Inventory,
+		Order:     w.in.Order.ID,
+		SKU:       w.in.Order.SKU,
+		Quantity:  w.in.Order.Quantity,
+	}
+}
+
+func (w *fulfillment) hold(ctx workflow.Context) error {
+	return workflow.SignalExternalWorkflow(ctx, w.in.Inventory, "", HoldSignal, w.req()).Get(ctx, nil)
+}
+
+func (w *fulfillment) release(ctx workflow.Context) error {
+	return workflow.SignalExternalWorkflow(ctx, w.in.Inventory, "", ReleaseSignal, w.req()).Get(ctx, nil)
+}
+
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Charge,
+		activity.ChargeReq{Order: w.in.Order}).Get(ctx, &w.charge)
+}
+
+func (w *fulfillment) refund(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Refund,
+		activity.ChargeReq{Order: w.in.Order, Charge: w.charge}).Get(ctx, nil)
 }
 
 // InventoryWorkflow is the long-running workflow the saga signals. It keeps a

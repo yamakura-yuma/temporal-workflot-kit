@@ -1,13 +1,15 @@
 // Package approval is the example for a saga that waits for a human between two
 // steps.
 //
-// It shows three things the order example does not. How a signal fits between
+// It shows three things the order example does not. How a wait fits between
 // saga steps, what to do at a branch (look at s.Err() first), and that a
 // rollback triggered by a business decision is written the same way as one
 // triggered by a failure -- you return an error.
 //
-// It has no activity of its own. It calls the shared ones in example/activity/,
-// so this file is only about the signal.
+// The wait is a step like any other, and it is why a step's halves are plain
+// workflow functions: waiting runs no activity at all. Being a step is what
+// makes it skippable once an earlier step has failed, so a saga on its way to a
+// rollback does not sit here for an hour first.
 package approval
 
 import (
@@ -29,6 +31,8 @@ const ApprovalSignal = "approval"
 // DeniedType is the error type the saga fails with when a human says no, so a
 // caller can tell it apart from a step that broke.
 const DeniedType = "ApprovalDenied"
+
+var acts *activity.Activities
 
 // Decision is what a reviewer sends.
 type Decision struct {
@@ -54,54 +58,76 @@ type Receipt struct {
 // reviewer says no, nobody answers in time, or the workflow is canceled while
 // waiting.
 func ApprovalWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
-	var a *activity.Activities
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
 
-	wait := time.Duration(in.WaitSeconds) * time.Second
+	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+			w := &fulfillment{in: in}
+
+			saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+
+			// Nothing to undo about having waited, so the compensation is nil.
+			saga.Step(ctx, s, "approval", w.await, nil)
+
+			saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
+
+			return Receipt{Reservation: w.reservation, Charge: w.charge}, nil
+		})
+}
+
+type fulfillment struct {
+	in Request
+
+	reservation string
+	charge      string
+	decision    Decision
+}
+
+func (w *fulfillment) reserve(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Reserve,
+		activity.ReserveReq{Order: w.in.Order}).Get(ctx, &w.reservation)
+}
+
+func (w *fulfillment) unreserve(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Unreserve,
+		activity.ReserveReq{Order: w.in.Order, Reservation: w.reservation}).Get(ctx, nil)
+}
+
+// await waits for a reviewer and turns the answer into a result or an error.
+// Returning an error is the whole rollback trigger: Run releases the
+// reservation on the way out.
+//
+// What "nobody answered" means is decided here, the same way an activity
+// decides what its own failure means, so no branch leaks into the saga body.
+func (w *fulfillment) await(ctx workflow.Context) error {
+	wait := time.Duration(w.in.WaitSeconds) * time.Second
 	if wait <= 0 {
 		wait = time.Minute
 	}
 
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions: workflow.ActivityOptions{
-			StartToCloseTimeout: 10 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-		},
-		CompensationBudget: time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), activity.ReserveReq{Order: in.Order})
-
-		// The wait is a step like any other. What "nobody answered" means is
-		// decided inside awaitApproval, the same way an activity decides what
-		// its own failure means, so no branch leaks into this body.
-		saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
-
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), activity.ChargeReq{Order: in.Order})
-
-		return Receipt{Reservation: res, Charge: chg}, nil
-	})
-}
-
-// ApprovalReq is the input of the approval step.
-type ApprovalReq struct {
-	// Wait bounds how long a reviewer has.
-	Wait time.Duration `json:"wait"`
-}
-
-// awaitApproval waits for a reviewer and turns the answer into a result or an
-// error. It is ordinary workflow code, written by the caller, in the same place
-// an activity would be: the saga only sequences it.
-//
-// Returning an error is the whole rollback trigger. Run releases the
-// reservation on the way out.
-func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
-	decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+	decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, wait)
 	if !ok {
-		return Decision{}, temporal.NewApplicationError(
+		return temporal.NewApplicationError(
 			"nobody reviewed the order in time", DeniedType, nil)
 	}
 	if !decision.Approved {
-		return Decision{}, temporal.NewApplicationError(
+		return temporal.NewApplicationError(
 			"the order was rejected by "+decision.By, DeniedType, nil)
 	}
-	return decision, nil
+
+	w.decision = decision
+	return nil
+}
+
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Charge,
+		activity.ChargeReq{Order: w.in.Order, Reservation: w.reservation}).Get(ctx, &w.charge)
+}
+
+func (w *fulfillment) refund(ctx workflow.Context) error {
+	return workflow.ExecuteActivity(ctx, acts.Refund,
+		activity.ChargeReq{Order: w.in.Order, Charge: w.charge}).Get(ctx, nil)
 }

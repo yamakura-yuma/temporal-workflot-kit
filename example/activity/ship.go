@@ -18,6 +18,10 @@ type ShipReq struct {
 	// ApprovedBy names the reviewer, for a saga that waits for one; see
 	// example/workflow/state.
 	ApprovedBy string `json:"approved_by,omitempty"`
+
+	// Shipment is what Ship returned, filled in when CancelShipment is undoing
+	// a booking that was actually made.
+	Shipment string `json:"shipment,omitempty"`
 }
 
 // Ship books a shipment for the order.

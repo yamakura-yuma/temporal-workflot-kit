@@ -78,38 +78,55 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 
-		// What the compensation acted under. Its ActivityID is the key with
-		// ":undo" on the end, which is what saga.IdempotencyKey strips off.
-		undone := run.GetRunID() + "/pack"
+		// The key the compensation was handed, out of the parent's history.
+		parent, err := s.history()
+		if err != nil {
+			return err
+		}
+		undone, err := packKeyIn(parent, "pack:undo")
+		if err != nil {
+			return fmt.Errorf("取り消し側: %w", err)
+		}
 
-		// What the child passed down. The packing activity runs inside the
-		// child, so the child's own history is what records it -- and it
-		// records the value the child read with saga.IdempotencyKeyOf, not a
-		// value any activity reported about itself.
-		child, err := s.historyOf(undone, "", "")
+		// The key the packing child handed its activity, out of the child's own
+		// history. The child runs the activity, so only the child's history
+		// records what it passed down.
+		child, err := s.historyOf(run.GetRunID()+"/pack", "", "")
 		if err != nil {
 			return fmt.Errorf("梱包の子の履歴を読めません: %w", err)
 		}
 		if len(child.scheduled) == 0 {
 			return errors.New("梱包の子はアクティビティを実行していません")
 		}
-
-		var packed struct {
-			Key string `json:"key"`
-		}
-		if err := converter.GetDefaultDataConverter().
-			FromPayloads(child.input[child.scheduled[0]], &packed); err != nil {
-			return fmt.Errorf("梱包の子が渡した入力を読めません: %w", err)
+		packed, err := packKeyIn(child, child.scheduled[0])
+		if err != nil {
+			return fmt.Errorf("梱包側: %w", err)
 		}
 
-		if packed.Key == "" {
-			return errors.New("梱包の子が冪等キーを読めていません")
+		if packed == "" {
+			return errors.New("梱包の子が冪等キーを渡していません")
 		}
-		if packed.Key != undone {
-			return fmt.Errorf("冪等キーが一致しません: pack=%q unpack=%q", packed.Key, undone)
+		if packed != undone {
+			return fmt.Errorf("冪等キーが一致しません: pack=%q unpack=%q", packed, undone)
 		}
 		return nil
 	})
+}
+
+// packKeyIn decodes the idempotency key out of the PackReq a step was handed.
+func packKeyIn(h *sagaHistory, step string) (string, error) {
+	payloads, ok := h.input[step]
+	if !ok {
+		return "", fmt.Errorf("ステップ %q は実行されていません", step)
+	}
+
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := converter.GetDefaultDataConverter().FromPayloads(payloads, &req); err != nil {
+		return "", fmt.Errorf("入力を読めません: %w", err)
+	}
+	return req.Key, nil
 }
 
 func (s *scenarioState) startChildflow(in activity.Order) error {

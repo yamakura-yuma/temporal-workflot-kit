@@ -14,6 +14,10 @@ type ChargeReq struct {
 	// example/workflow/pipeline fills it, and that is the whole of what
 	// pipeline is about.
 	Reservation string `json:"reservation,omitempty"`
+
+	// Charge is what Charge returned, filled in when Refund is undoing a charge
+	// that was actually made.
+	Charge string `json:"charge,omitempty"`
 }
 
 // Charge takes payment for the order.

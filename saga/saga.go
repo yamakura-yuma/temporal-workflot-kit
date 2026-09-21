@@ -17,24 +17,16 @@ import (
 // the same key.
 const undoSuffix = ":undo"
 
-// Options configures a saga. The zero value is usable except for
-// ActivityOptions, which must carry a timeout like any other activity call.
+// Options configures a saga.
 type Options struct {
-	// ActivityOptions are the defaults for forward steps. Temporal requires at
-	// least one of StartToCloseTimeout or ScheduleToCloseTimeout.
-	ActivityOptions workflow.ActivityOptions
-
-	// CompensationOptions are the defaults for compensations. Compensations
-	// usually want a longer budget and more attempts than the forward step they
-	// undo. When zero, ActivityOptions is used.
-	CompensationOptions workflow.ActivityOptions
-
 	// CompensationBudget bounds the whole compensation phase. It is required:
 	// compensations run on a disconnected context that nothing can cancel from
 	// the outside, so without a budget a stuck compensation hangs the workflow
-	// forever. Each compensation's ScheduleToCloseTimeout is clamped to the
-	// budget remaining when it starts, and any compensation left when the
-	// budget runs out is reported as skipped rather than silently dropped.
+	// forever. Any compensation left when the budget runs out is reported as
+	// skipped rather than silently dropped.
+	//
+	// It bounds the sequence, not each call. A compensation that wants its own
+	// timeout narrowed to what is left can ask RemainingBudget.
 	CompensationBudget time.Duration
 
 	// StopOnCompensationError stops the compensation phase at the first
@@ -42,28 +34,6 @@ type Options struct {
 	// which is usually what you want: one refund failing is no reason to leave
 	// the inventory reserved too.
 	StopOnCompensationError bool
-
-	// KeyFunc derives the idempotency key for a step. The default is
-	// RunID + "/" + name, which means "this attempt happens once".
-	//
-	// WorkflowExecution.ID + "/" + name means "this business operation happens
-	// once" instead. The only condition on a key is that its grain match the
-	// grain of the business operation, so use it when the WorkflowID has that
-	// grain -- a per-request ID does; an ID reused across several workflows,
-	// such as an order ID or a cron schedule, is coarser, and every step of the
-	// second workflow would be skipped. See docs/design.md.
-	//
-	// It must be deterministic: the same workflow run must produce the same key
-	// for the same step name on replay. Do not key on FirstRunID -- it is
-	// preserved across ContinueAsNew, Retry, Cron and Reset much as WorkflowID
-	// is, but the server picks its value, so a second run reuses the first
-	// run's keys whether or not that was the intent. Key on
-	// WorkflowExecution.ID when you do intend it.
-	//
-	// The key must contain a non-digit character. An activity with no explicit
-	// ActivityID gets a plain decimal one from the SDK, so a purely numeric key
-	// can collide with an unrelated activity.
-	KeyFunc func(ctx workflow.Context, name string) string
 
 	// CompensationFailedAttribute, when set, is flipped to true if any
 	// compensation fails or is skipped, so operators can search for sagas that
@@ -149,21 +119,22 @@ func newSaga(o Options) (*Saga, error) {
 	if o.CompensationBudget <= 0 {
 		return nil, fmt.Errorf("saga: Options.CompensationBudget must be positive")
 	}
-	if o.ActivityOptions.StartToCloseTimeout <= 0 && o.ActivityOptions.ScheduleToCloseTimeout <= 0 {
-		return nil, fmt.Errorf("saga: Options.ActivityOptions needs StartToCloseTimeout or ScheduleToCloseTimeout")
-	}
-	if o.CompensationOptions.StartToCloseTimeout <= 0 && o.CompensationOptions.ScheduleToCloseTimeout <= 0 {
-		o.CompensationOptions = o.ActivityOptions
-	}
-	if o.KeyFunc == nil {
-		o.KeyFunc = DefaultKey
-	}
+
 	return &Saga{opts: o, names: map[string]struct{}{}}, nil
 }
 
-// DefaultKey derives a step's idempotency key from the current run and the step
-// name. It is Options.KeyFunc's default.
-func DefaultKey(ctx workflow.Context, name string) string {
+// StepKey derives a value unique to one step of one workflow run, which is what
+// an idempotency key has to be.
+//
+// The library does not use it or pass it anywhere. It is here because deriving
+// it is the one part Temporal does not do for you, and getting it wrong is
+// quiet: keying on FirstRunID, for instance, reuses the previous run's keys
+// after a Retry or a Reset, and every step is then mistaken for one that
+// already ran.
+//
+// Put the result in the request you send, where the service you call can
+// enforce it. See docs/activity-contract.md.
+func StepKey(ctx workflow.Context, name string) string {
 	return workflow.GetInfo(ctx).WorkflowExecution.RunID + "/" + name
 }
 

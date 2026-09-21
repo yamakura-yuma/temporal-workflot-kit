@@ -44,26 +44,38 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 
 ```go
 func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-    var a *Activities
+    ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+        StartToCloseTimeout: 10 * time.Second,
+    })
 
     return saga.Run(ctx, saga.Options{
-        ActivityOptions:    workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second},
         CompensationBudget: 5 * time.Minute,
     }, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-        res, _ := saga.Step(ctx, s, "reserve",
-            saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
-        chg, _ := saga.Step(ctx, s, "charge",
-            saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in})
-        shp, _ := saga.Step(ctx, s, "ship",
-            saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in})
+        w := &fulfillment{in: in}
 
-        return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
+        saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+        saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
+        saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+
+        return w.receipt(), nil
     })
+}
+
+// ステップの半分は、ただのワークフローコード。ライブラリは何も包みません
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Charge,
+        ChargeReq{Order: w.in, Reservation: w.reservation}).Get(ctx, &w.charge)
+}
+
+// 補償は、forward が書いたフィールドをそのまま読めます
+func (w *fulfillment) refund(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Refund,
+        ChargeReq{Order: w.in, Charge: w.charge}).Get(ctx, nil)
 }
 ```
 
-ステップのエラーを `_` で捨てているのは手抜きではありません。最初の失敗以降、後続の
-`saga.Activity` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
+`saga.Step` の戻り値を捨てているのは手抜きではありません。最初の失敗以降、後続の
+`saga.Step` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
 外に出ません。
 
 振る舞いは `docs/specs/` に実行できる仕様として置いてあり、`just spec` が実際の Temporal
@@ -143,13 +155,9 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 | --- | --- |
 | `saga.Run(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
 | `saga.Step(ctx, s, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
-| `saga.Activity(f)` / `saga.UndoActivity(f)` | その半分をアクティビティで実行する |
-| `saga.ChildWorkflow(f)` / `saga.UndoChildWorkflow(f)` | その半分を子ワークフローで実行する |
-| `saga.Func(f)` / `saga.UndoFunc(f)` | その半分をこのワークフローの中で呼ぶ |
+| `saga.StepKey(ctx, name)` | 1回の実行の1ステップに固有の文字列。冪等キーに使う |
 | `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`saga.Func` の中で使う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
-| `saga.IdempotencyKey(ctx)` | アクティビティ側から冪等キーを読む |
-| `saga.IdempotencyKeyOf(ctx)` | 子ワークフロー側から冪等キーを読む |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 
 `CompensationBudget` は必須です。補償は外から誰もキャンセルできない context で走るので、

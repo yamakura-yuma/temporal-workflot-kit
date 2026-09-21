@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
@@ -55,8 +56,15 @@ func (r *recorder) snapshot() ([]string, map[string]string) {
 
 type acts struct{ r *recorder }
 
+// stepOf is the step an activity is running for. The library names activities
+// "<RunID>/<step>", and a compensation's carries ":undo", so stripping that
+// gives both halves of a step the same answer.
+func stepOf(ctx context.Context) string {
+	return strings.TrimSuffix(activity.GetInfo(ctx).ActivityID, ":undo")
+}
+
 func (a *acts) Do(ctx context.Context, in req) (string, error) {
-	key, _ := saga.IdempotencyKey(ctx)
+	key := stepOf(ctx)
 	a.r.record("do:"+in.Step, key)
 	if in.Fail {
 		return "", errors.New("forward failed: " + in.Step)
@@ -65,13 +73,13 @@ func (a *acts) Do(ctx context.Context, in req) (string, error) {
 }
 
 func (a *acts) Undo(ctx context.Context, in req) error {
-	key, _ := saga.IdempotencyKey(ctx)
+	key := stepOf(ctx)
 	a.r.record("undo:"+in.Step, key)
 	return nil
 }
 
 func (a *acts) UndoFails(ctx context.Context, in req) error {
-	key, _ := saga.IdempotencyKey(ctx)
+	key := stepOf(ctx)
 	a.r.record("undo:"+in.Step, key)
 	return errors.New("compensation failed: " + in.Step)
 }
@@ -108,22 +116,35 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 	// calls, and the SDK's default retry policy would repeat the failures.
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
 	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  budget,
+		CompensationBudget: budget,
 	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		var out []string
 		for i, spec := range p.Steps {
-			undo := a.Undo
+			in := req{Step: spec.Name, Fail: spec.Fail}
+
+			undoFn := a.Undo
 			switch {
 			case spec.NoUndo:
-				undo = nil
+				undoFn = nil
 			case spec.UndoFails:
-				undo = a.UndoFails
+				undoFn = a.UndoFails
 			}
 
-			v, _ := saga.Step(ctx, s, spec.Name, saga.Activity(a.Do), saga.UndoActivity(undo), req{Step: spec.Name, Fail: spec.Fail})
+			var undo func(workflow.Context) error
+			if undoFn != nil {
+				undo = func(ctx workflow.Context) error {
+					return workflow.ExecuteActivity(ctx, undoFn, in).Get(ctx, nil)
+				}
+			}
+
+			var v string
+			saga.Step(ctx, s, spec.Name, func(ctx workflow.Context) error {
+				return workflow.ExecuteActivity(ctx, a.Do, in).Get(ctx, &v)
+			}, undo)
 			out = append(out, v)
 
 			if p.SleepAfter == i {
@@ -237,7 +258,7 @@ func TestDefaultKeyIsScopedToTheRun(t *testing.T) {
 	probe := func(ctx workflow.Context) (map[string]string, error) {
 		info := workflow.GetInfo(ctx)
 		return map[string]string{
-			"key":        saga.DefaultKey(ctx, "charge"),
+			"key":        saga.StepKey(ctx, "charge"),
 			"runID":      info.WorkflowExecution.RunID,
 			"firstRunID": info.FirstRunID,
 		}, nil
@@ -426,9 +447,8 @@ func TestBudgetIsRequired(t *testing.T) {
 	env := ts.NewTestWorkflowEnvironment()
 
 	noBudget := func(ctx workflow.Context) error {
-		_, err := saga.Run(ctx, saga.Options{
-			ActivityOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute},
-		}, func(workflow.Context, *saga.Saga) (int, error) { return 0, nil })
+		_, err := saga.Run(ctx, saga.Options{},
+			func(workflow.Context, *saga.Saga) (int, error) { return 0, nil })
 		return err
 	}
 	env.RegisterWorkflow(noBudget)
@@ -436,14 +456,6 @@ func TestBudgetIsRequired(t *testing.T) {
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.ErrorContains(t, env.GetWorkflowError(), "CompensationBudget")
-}
-
-// IdempotencyKey must not panic outside an activity, or activities stop being
-// unit-testable without a Temporal environment. activity.GetInfo does panic.
-func TestIdempotencyKeyOutsideAnActivity(t *testing.T) {
-	key, ok := saga.IdempotencyKey(context.Background())
-	require.False(t, ok)
-	require.Empty(t, key)
 }
 
 // --- child workflow steps ----------------------------------------------------
@@ -478,14 +490,26 @@ func mixedWorkflow(ctx workflow.Context) ([]string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
+	act := func(fn, in any) func(workflow.Context) error {
+		return func(ctx workflow.Context) error {
+			return workflow.ExecuteActivity(ctx, fn, in).Get(ctx, nil)
+		}
+	}
+	child := func(fn, in any) func(workflow.Context) error {
+		return func(ctx workflow.Context) error {
+			return workflow.ExecuteChildWorkflow(ctx, fn, in).Get(ctx, nil)
+		}
+	}
+
 	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  5 * time.Minute,
+		CompensationBudget: 5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
-		saga.Step(ctx, s, "a", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "a"})
-		saga.Step(ctx, s, "b", saga.ChildWorkflow(childDo), saga.UndoChildWorkflow(childUndo), req{Step: "b"})
-		saga.Step(ctx, s, "c", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "c", Fail: true})
+		saga.Step(ctx, s, "a", act(a.Do, req{Step: "a"}), act(a.Undo, req{Step: "a"}))
+		saga.Step(ctx, s, "b", child(childDo, req{Step: "b"}), child(childUndo, req{Step: "b"}))
+		saga.Step(ctx, s, "c", act(a.Do, req{Step: "c", Fail: true}), act(a.Undo, req{Step: "c"}))
 		return nil, s.Err()
 	})
 }
@@ -525,12 +549,15 @@ func TestChildWorkflowCompensatesInOneOrder(t *testing.T) {
 
 // waitStep is the wait written the way the library intends: a step of its own,
 // which decides for itself what a missing signal means.
-func waitStep(ctx workflow.Context, _ struct{}) (string, error) {
-	payload, arrived := saga.AwaitSignal[string](ctx, "never", time.Hour)
-	if !arrived {
-		return "", temporal.NewApplicationError("nobody answered", "NoAnswer", nil)
+func waitStep(out *string) func(workflow.Context) error {
+	return func(ctx workflow.Context) error {
+		payload, arrived := saga.AwaitSignal[string](ctx, "never", time.Hour)
+		if !arrived {
+			return temporal.NewApplicationError("nobody answered", "NoAnswer", nil)
+		}
+		*out = payload
+		return nil
 	}
-	return payload, nil
 }
 
 // awaitWorkflow waits an hour for a signal that never comes. When failFirst is
@@ -539,15 +566,26 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
 	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  5 * time.Minute,
+		CompensationBudget: 5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		if failFirst {
-			saga.Step(ctx, s, "a", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "a", Fail: true})
+			saga.Step(ctx, s, "a",
+				func(ctx workflow.Context) error {
+					return workflow.ExecuteActivity(ctx, a.Do, req{Step: "a", Fail: true}).Get(ctx, nil)
+				},
+				func(ctx workflow.Context) error {
+					return workflow.ExecuteActivity(ctx, a.Undo, req{Step: "a"}).Get(ctx, nil)
+				})
 		}
-		return saga.Step(ctx, s, "wait", saga.Func(waitStep), nil, struct{}{})
+		var payload string
+		if err := saga.Step(ctx, s, "wait", waitStep(&payload), nil); err != nil {
+			return "", err
+		}
+		return payload, nil
 	})
 }
 
@@ -603,12 +641,19 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
 	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  5 * time.Minute,
+		CompensationBudget: 5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
-		saga.Step(ctx, s, "reserve", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "reserve", Fail: true})
+		saga.Step(ctx, s, "reserve",
+			func(ctx workflow.Context) error {
+				return workflow.ExecuteActivity(ctx, a.Do, req{Step: "reserve", Fail: true}).Get(ctx, nil)
+			},
+			func(ctx workflow.Context) error {
+				return workflow.ExecuteActivity(ctx, a.Undo, req{Step: "reserve"}).Get(ctx, nil)
+			})
 
 		_, ok := saga.AwaitSignal[string](ctx, "approval", time.Second)
 		if !ok {

@@ -8,6 +8,12 @@ import (
 // ReserveReq is the input of the reserve step.
 type ReserveReq struct {
 	Order Order `json:"order"`
+
+	// Reservation is what Reserve returned. A saga fills it in when it undoes a
+	// reservation it has already made, and leaves it empty when the forward
+	// half never reported back -- in which case Unreserve has only the
+	// idempotency key the request carried to go on.
+	Reservation string `json:"reservation,omitempty"`
 }
 
 // Reserve holds stock for the order.

@@ -20,6 +20,10 @@ type PackReq struct {
 	// This one has nowhere to hand it, so it only has to arrive --
 	// docs/specs/childflow.feature checks that it did, out of the history.
 	Key string `json:"key,omitempty"`
+
+	// Pack is what Pack returned, filled in when Unpack is undoing a parcel
+	// that was actually packed.
+	Pack string `json:"pack,omitempty"`
 }
 
 // Pack makes the order ready to hand to a carrier.

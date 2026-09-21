@@ -7,29 +7,22 @@ fail=0
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-# 1. saga.Step の呼び出しが executor コンストラクタで包まれているか。
-#    引数を次の行に折り返す書き方があるので、2行の窓で見る。
-#    シグネチャの記載（saga.Step(ctx, s, name, fwd, undo, in)）は引数がクォート
-#    されないので、ここには当たらない。
-while IFS= read -r -d '' f; do
-  awk -v file="$f" '
-    /saga\.Step\(ctx, s, "/ { pending = $0; lineno = NR; next }
-    pending {
-      window = pending "\n" $0
-      if (window !~ /saga\.(Activity|ChildWorkflow|Func)\(/)
-        printf "%s:%d: %s\n", file, lineno, pending
-      pending = ""
-    }
-    END {
-      if (pending && pending !~ /saga\.(Activity|ChildWorkflow|Func)\(/)
-        printf "%s:%d: %s\n", file, lineno, pending
-    }
-  ' "$f"
-done < <(find docs .apm -name '*.md' -print0; printf 'README.md\0') > "$tmp"
+# 1. 消した API がドキュメントに残っていないか。
+#    saga.Activity / UndoActivity / ChildWorkflow / UndoChildWorkflow / Func /
+#    UndoFunc と IdempotencyKey / IdempotencyKeyOf / DefaultKey は無い。ステップの
+#    両半分はただの func(workflow.Context) error になった。
+#
+#    docs/design.md と docs/activity-contract.md は別の作業で書き換え中なので、
+#    いまは対象外。書き換えが終わったらこの除外を消すこと。
+gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc)\(|saga\.(IdempotencyKey|IdempotencyKeyOf|DefaultKey)\b'
+
+grep -rnE "$gone" docs .apm README.md \
+  | grep -v '^docs/design\.md:' \
+  | grep -v '^docs/activity-contract\.md:' > "$tmp" || true
 
 if [ -s "$tmp" ]; then
-  echo "saga.Step の forward と補償は saga.Activity / ChildWorkflow / Func と" >&2
-  echo "対応する saga.Undo* で包む:" >&2
+  echo "消した API がドキュメントに残っている（ステップの両半分は" >&2
+  echo "func(workflow.Context) error、冪等キーは saga.StepKey）:" >&2
   cat "$tmp" >&2
   fail=1
 fi
