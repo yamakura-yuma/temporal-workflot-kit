@@ -87,8 +87,8 @@ dev server を起動して確かめます。
 * 課金の後で待機する注文 "cancelme"
 * "charge" が実行されたら saga をキャンセルする
 * saga は失敗する
-* ステップ "reserve, charge, charge:undo, reserve:undo" が実行された
-* 注文は "reserve, charge" を保持していない
+* アクティビティ "Reserve, Charge, Refund, Unreserve" が実行された
+* 注文は "Reserve, Charge" を保持していない
 ```
 
 ## 機能・特徴
@@ -97,12 +97,15 @@ dev server を起動して確かめます。
 | --- | --- |
 | ロールバック | 失敗すると、登録済みの補償を逆順で実行する |
 | キャンセル対応 | ワークフローがキャンセルされても補償は実行される |
-| 冪等キーの払い出し | ステップごとにキーを作り、forward と補償の両方に渡す |
-| 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
+| 登録の順序 | 補償は forward を**実行する前**に登録される。タイムアウトした forward も取り消される |
 | 失敗の報告 | 補償が失敗したら、型付きのエラーと、どのステップかの一覧で残す。元のエラーは消さない |
-| 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
-| ステップの種類を選べる | アクティビティ / 子ワークフロー / 自分の関数。**forward と補償で別々に選べる**。混ざっても1つの逆順で巻き戻る |
-| 逃げ道 | `Add` で任意の取り消しを登録できる |
+| 出口が1つ | エラーチェックを忘れても、ステップが失敗していればワークフローは失敗する |
+| 巻き戻しの制御 | `ParallelCompensation` と `ContinueWithError`（Java SDK の `Saga` と同じ2つ） |
+
+ステップの両半分は `func(workflow.Context) error` です。**ライブラリは
+`workflow.ExecuteActivity` を包みません。** アクティビティで実行するのも、子ワークフローで
+実行するのも、signal を待つのも、その関数に何を書くかの違いです。タイムアウトもリトライも
+普通に context へ載せてください。
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
 コード付きで書いてあります。Temporal が初めてなら、その前に登場人物を図で押さえる
@@ -120,13 +123,13 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 ## 使用方法
 
-デモの後半がそのまま使い方です。`saga.RunOrCompensate` にワークフロー本体を渡し、各ステップを
-`saga.Activity` で書きます。
+デモの後半がそのまま使い方です。`saga.RunOrCompensate` にワークフロー本体を渡し、
+`s.Step` に forward と補償の2つの関数を渡します。
 
-アクティビティ側には2つだけ約束があります。forward は冪等キーを**原子的に** claim する
-こと、補償は取り消すものが無いときに成功すること。どちらも外すとロールバックが壊れるので、
-[docs/activity-contract.md](docs/activity-contract.md) を先に読んでください。塞げていない
-穴も同じ文書に書いてあります。
+**このライブラリが守るのは2つだけです。** 補償を forward より先に登録すること、失敗したら
+切り離した context で逆順に実行すること。残りは利用者側の契約で、守らないとロールバックが
+静かに壊れます。先に [docs/interface.md](docs/interface.md) を読んでください。塞げていない
+穴も同じ文書にあります。
 
 ### 他のパターン
 
@@ -141,10 +144,10 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 | 例 | 何を見せているか | 図 |
 | --- | --- | --- |
-| [`example/workflow/order/`](example/workflow/order/) | 基本形。3ステップと補償、冪等キーを呼び先に渡すアクティビティの書き方 | [図](example/workflow/order/diagram.html) |
+| [`example/workflow/order/`](example/workflow/order/) | 基本形。3ステップと補償、冪等キーを呼び先に渡すアクティビティの書き方、巻き戻し失敗の検知 | [図](example/workflow/order/diagram.html) |
 | [`example/workflow/pipeline/`](example/workflow/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/workflow/pipeline/diagram.html) |
 | [`example/workflow/state/`](example/workflow/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/workflow/state/diagram.html) |
-| [`example/workflow/childflow/`](example/workflow/childflow/) | 子ワークフローで実行し、アクティビティで取り消すステップ。冪等キーは executor を跨いで同じ | [図](example/workflow/childflow/diagram.html) |
+| [`example/workflow/childflow/`](example/workflow/childflow/) | forward を子ワークフロー、取り消しをアクティビティで実行するステップ。冪等キーを境界の向こうへ渡す | [図](example/workflow/childflow/diagram.html) |
 | [`example/workflow/approval/`](example/workflow/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/workflow/approval/diagram.html) |
 | [`example/workflow/external/`](example/workflow/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/workflow/external/diagram.html) |
 
@@ -155,8 +158,8 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 | | |
 | --- | --- |
 | `saga.RunOrCompensate(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
-| `s.Step(ctx, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
-| `saga.StepKey(ctx, name)` | 1回の実行の1ステップに固有の文字列。冪等キーに使う |
+| `s.Step(ctx, name, do, undo)` | 補償を登録してから forward を実行する。両方 `func(workflow.Context) error` |
+| `s.Err()` / `s.ClearErr()` | 最初に失敗したステップのエラーと、それを握るとき |
 | `saga.Options` | `ParallelCompensation` と `ContinueWithError` の2つだけ。どちらも任意 |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 

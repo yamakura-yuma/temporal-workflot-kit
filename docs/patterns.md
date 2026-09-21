@@ -8,12 +8,12 @@
 
 | 知りたいこと | 答え | 実物 | 図 |
 | --- | --- | --- | --- |
-| ステップはアクティビティに限るのか | 限らない。`saga.Step` に渡す値で決まる | [`example/workflow/childflow/`](../example/workflow/childflow/) | [図](../example/workflow/childflow/diagram.html) |
+| ステップはアクティビティに限るのか | 限らない。関数の中に何を書くかで決まる | [`example/workflow/childflow/`](../example/workflow/childflow/) | [図](../example/workflow/childflow/diagram.html) |
 | アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/workflow/pipeline/`](../example/workflow/pipeline/) | [図](../example/workflow/pipeline/diagram.html) |
 | `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行。素の形との読み比べは [`workflow_flat.go`](../example/workflow/state/workflow_flat.go) | [`example/workflow/state/`](../example/workflow/state/) | [図](../example/workflow/state/diagram.html) |
-| signal を待つには | `saga.Func` でステップにする。判断は自分の関数の中 | [`example/workflow/approval/`](../example/workflow/approval/) | [図](../example/workflow/approval/diagram.html) |
-| signal を送るステップは書けるか | 書ける。`saga.Func` で。ただし冪等キーは載らない | [`example/workflow/external/`](../example/workflow/external/) | [図](../example/workflow/external/diagram.html) |
-| 基本形 | 3ステップと補償、冪等キーを呼び先に渡すアクティビティ | [`example/workflow/order/`](../example/workflow/order/) | [図](../example/workflow/order/diagram.html) |
+| signal を待つには | 待つ関数をステップの forward にする。判断はその中 | [`example/workflow/approval/`](../example/workflow/approval/) | [図](../example/workflow/approval/diagram.html) |
+| signal を送るステップは書けるか | 書ける。ただし冪等キーは載らない | [`example/workflow/external/`](../example/workflow/external/) | [図](../example/workflow/external/diagram.html) |
+| 基本形 | 3ステップと補償、巻き戻しが失敗したときの検知 | [`example/workflow/order/`](../example/workflow/order/) | [図](../example/workflow/order/diagram.html) |
 
 ---
 
@@ -29,6 +29,8 @@ func (w *fulfillment) reserve(ctx workflow.Context) error {
     return workflow.ExecuteActivity(ctx, acts.Reserve, ReserveReq{Order: w.in}).Get(ctx, &w.reservation)
 }
 ```
+
+実物: [`example/workflow/order/workflow.go`](../example/workflow/order/workflow.go)
 
 **ライブラリは `ExecuteActivity` を包みません。** だから何で実行するかは、関数の中に何を
 書くかの違いでしかありません。
@@ -61,6 +63,8 @@ ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 })
 ```
 
+実物: 4つとも `example/workflow/` にあります（順に order・childflow・external・approval）。
+
 **ローカルアクティビティも書けます。** ただし取り消しが要る副作用を置く場所ではありません。
 リトライがワークフロータスク内で完結してサーバに残らないためです。
 
@@ -75,6 +79,8 @@ saga.Options{
     ContinueWithError:    true,   // 1本失敗しても残りを続ける
 }
 ```
+
+実物: [`example/workflow/order/workflow.go`](../example/workflow/order/workflow.go)
 
 どちらも Java SDK の `io.temporal.workflow.Saga` と同じ名前・同じ既定です。ただし
 **`ContinueWithError` は入れたほうがよい場面が多い**と思います。返金が失敗したからといって、
@@ -102,19 +108,26 @@ ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 })
 ```
 
+実物: [`example/workflow/order/workflow.go`](../example/workflow/order/workflow.go)
+
 ライブラリはここに介入しません。普通の Temporal の設定で足りるからです。
 
 ### 冪等キー
 
-ライブラリは冪等キーを渡しません。`saga.StepKey(ctx, "charge")` が「1回の実行の1ステップ」に
-固有の文字列を返すので、**自分でリクエストに入れてください**。下流がそれで重複を弾きます。
+**ライブラリは冪等キーを作りも渡しもしません。** 「1回の実行の1ステップ」に固有の文字列を
+自分で作り、リクエストに入れてください。下流がそれで重複を弾きます。
 
 ```go
-req := ChargeReq{Order: w.in, IdemKey: saga.StepKey(ctx, "charge")}
+func packKey(ctx workflow.Context) string {
+	return workflow.GetInfo(ctx).WorkflowExecution.RunID + "/pack"
+}
 ```
 
-キーを原子的に押さえるのは下流の仕事で、ライブラリにはできません。詳しくは
-[activity-contract.md](activity-contract.md)。
+実物: [`example/workflow/childflow/workflow.go`](../example/workflow/childflow/workflow.go)
+（子ワークフローとアクティビティの両方に同じキーを渡している）
+
+`FirstRunID` は使わないでください。キーを原子的に押さえるのは下流の仕事で、ライブラリには
+できません。理由も含めて [interface.md](interface.md) の C2・C3 にあります。
 
 ## 前のステップの結果を次のステップや補償で使う
 
@@ -137,6 +150,8 @@ func (w *fulfillment) refund(ctx workflow.Context) error {
         ChargeReq{Order: w.in, Charge: w.charge}).Get(ctx, nil)                   // ← 自分の forward の出力
 }
 ```
+
+実物: [`example/workflow/pipeline/workflow.go`](../example/workflow/pipeline/workflow.go)
 
 **補償が自分の forward の出力を使えます。** 補償は forward より先に登録されますが、
 *実行される*のは後なので、その時点でフィールドは埋まっています。他の saga 実装が補償ログと
@@ -164,6 +179,8 @@ return saga.RunOrCompensate(ctx, opts, func(ctx workflow.Context, s *saga.Saga) 
 })
 ```
 
+実物: [`example/workflow/state/workflow.go`](../example/workflow/state/workflow.go)
+
 ここだけ読めば、何が何の順で起きて、どれが取り消せるかが分かります。`ExecuteActivity` も
 リクエストの組み立ても、各メソッドの中です。
 
@@ -180,6 +197,8 @@ s.Step(ctx, "reserve",
         return workflow.ExecuteActivity(ctx, acts.Unreserve, req).Get(ctx, nil)
     })
 ```
+
+実物: [`example/workflow/state/workflow_flat.go`](../example/workflow/state/workflow_flat.go)
 
 次のどれかに当たったらメソッドに割ってください。
 
@@ -220,6 +239,8 @@ func (w *fulfillment) await(ctx workflow.Context) error {
 }
 ```
 
+実物: [`example/workflow/approval/workflow.go`](../example/workflow/approval/workflow.go)
+
 判断は `await` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を関数の中に
 閉じ込めるのと同じ立ち位置です。
 
@@ -253,6 +274,8 @@ func (w *fulfillment) release(ctx workflow.Context) error {
     return workflow.SignalExternalWorkflow(ctx, w.in.Inventory, "", ReleaseSignal, w.req()).Get(ctx, nil)
 }
 ```
+
+実物: [`example/workflow/external/workflow.go`](../example/workflow/external/workflow.go)
 
 補償は forward と同じ payload を送れるので、押さえた分だけを正確に戻せます。
 

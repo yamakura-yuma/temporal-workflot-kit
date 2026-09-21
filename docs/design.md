@@ -140,7 +140,7 @@ func (s *Saga) Step(ctx workflow.Context, name string, do, undo func(workflow.Co
 
 **補償は「取り消すものが無い」ときに成功しなければなりません。** 起きなかったステップに
 対しても呼ばれるためです。そこでエラーを返すと、ロールバック全体が失敗扱いになります。
-詳しくは [activity-contract.md](activity-contract.md)。
+詳しくは [interface.md](interface.md)。
 
 ---
 
@@ -365,7 +365,7 @@ s.Step(ctx, "reserve", w.unreserve, w.reserve)   // ← 通ってしまう
 
 理由は、**ライブラリにできることが「文字列を1つ作る」だけだった**からです。原子的に
 押さえるのも、保存するのも、下流との契約も、全部利用者側です
-（[activity-contract.md](activity-contract.md)）。そのうえ、鍵を読むために
+（[interface.md](interface.md)）。そのうえ、鍵を読むために
 **アクティビティが saga ライブラリを import する**必要がありました。アクティビティは
 自分が saga の一部だと知る必要がありません。
 

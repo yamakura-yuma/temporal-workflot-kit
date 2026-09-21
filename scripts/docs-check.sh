@@ -17,7 +17,6 @@ trap 'rm -f "$tmp"' EXIT
 gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc)\(|\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|KeyFunc|CompensationBudget|RemainingBudget|AwaitSignal)\b|\bsaga\.Run\(|\bsaga\.Step\('
 
 grep -rnE "$gone" docs .apm README.md \
-  | grep -v '^docs/activity-contract\.md:' \
   | grep -v '^docs/design\.md:' > "$tmp" || true
 
 # docs/design.md は「意図して手放したもの」の節で、消した API を名指しで説明している。

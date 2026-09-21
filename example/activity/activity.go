@@ -17,7 +17,7 @@
 // below, which is why there is nothing here to keep it in.
 //
 // The consequence is that nothing here reads the idempotency key, because there
-// is nothing to hand it to. docs/activity-contract.md has the shape a real one
+// is nothing to hand it to. docs/interface.md has the shape a real one
 // takes -- the key as a UNIQUE column, or an Idempotency-Key header -- and
 // saga.IdempotencyKey is how an activity reads it. What the specifications
 // check instead is the workflow history, which is Temporal's own record of what

@@ -14,7 +14,7 @@ description: >-
 
 レイアウトは `CLAUDE.md`、なぜこの形かは `docs/design.md`、よくある形は
 `docs/patterns.md` と `example/*/`、アクティビティ側の契約は
-`docs/activity-contract.md`。
+`docs/interface.md`。
 
 ## パッケージが依存している不変条件
 
@@ -71,7 +71,7 @@ description: >-
    共有できるようにするため。
 2. アクティビティ側の契約を満たす — 冪等キーを**原子的に claim** し、補償は
    取り消すものが無いときに成功する。書き方と、契約を守っても塞げないことは
-   `docs/activity-contract.md`。
+   `docs/interface.md`。
 3. `s.Step(ctx, name, fwd, undo, in)` を、saga 内で一意な名前で呼ぶ。
    `fwd` は `saga.Activity` / `saga.ChildWorkflow` / `saga.Func` の1つ、`undo` は
    対応する `saga.Undo*` か nil。直線的な saga ならステップのエラーは無視してよい。

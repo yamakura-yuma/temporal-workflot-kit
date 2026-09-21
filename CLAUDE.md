@@ -16,7 +16,7 @@ Temporal のワークフローを書くための Go の部品集。今入って�
 - `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`saga.Activity` が forward を1つ
   実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
 - `docs/` — ドキュメント。`design.md`（なぜこの形か）、`patterns.md`（よくある形と
-  example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
+  example への索引）、`interface.md`（アクティビティ側の契約と、塞げていない
   こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
   得た事実の出自と、その版）
 - `docs/specs/` — 日本語の Gherkin（`.feature`）で書かれた実行される仕様と、その索引
