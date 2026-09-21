@@ -1,9 +1,6 @@
 package specsteps
 
-// The steps for docs/specs/approval.feature. The outcome steps ("saga は失敗する",
-// "ステップ ... が実行された" and so on) are shared with the rollback
-// specification: they read the workflow from the scenario store and do not
-// care which workflow put it there.
+// The steps for docs/specs/approval.feature. The outcome steps live in steps_test.go.
 
 import (
 	"context"
@@ -45,7 +42,7 @@ func (s *scenarioState) startApproval(id string, waitSeconds int) error {
 		WaitSeconds: waitSeconds,
 	}
 
-	run, err := temporalClient.ExecuteWorkflow(context.Background(),
+	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "approval-" + id, TaskQueue: approval.TaskQueue},
 		approval.ApprovalWorkflow, in)
 	if err != nil {
@@ -62,7 +59,7 @@ func (s *scenarioState) signal(d approval.Decision) error {
 	if err != nil {
 		return err
 	}
-	if err := temporalClient.SignalWorkflow(context.Background(),
+	if err := s.client.SignalWorkflow(context.Background(),
 		run.GetID(), run.GetRunID(), approval.ApprovalSignal, d); err != nil {
 		return fmt.Errorf("could not signal the saga: %w", err)
 	}

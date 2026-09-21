@@ -23,7 +23,11 @@ package specsteps
 // `^注文 "([^"]*)"$` would also match 承認待ちの注文 "approved", and godog would
 // report the step as ambiguous.
 //
-// The steps below are kept in the order the scenarios use them.
+// The outcome steps below ("saga は成功する", "ステップ ... が実行された" and so
+// on) are shared with every other specification: they read the workflow from
+// the scenario store and do not care which workflow put it there.
+//
+// The steps are kept in the order the scenarios use them.
 
 import (
 	"context"
@@ -46,9 +50,11 @@ import (
 // struct type of its own cannot collide with another package's key.
 type scenarioKey struct{}
 
-// scenarioState is what one scenario remembers between its steps. It is handed
-// out as a pointer, so a step mutates it in place.
+// scenarioState is what one scenario remembers between its steps, over the
+// suite it runs against.
 type scenarioState struct {
+	*suite
+
 	run       client.WorkflowRun // the saga under test
 	inventory client.WorkflowRun // the external example's long-lived workflow
 	result    error              // the saga's outcome, once awaited
@@ -97,7 +103,7 @@ func (s *scenarioState) scheduledSteps() ([]string, error) {
 	}
 	prefix := run.GetRunID() + "/"
 
-	iter := temporalClient.GetWorkflowHistory(context.Background(), run.GetID(), run.GetRunID(),
+	iter := s.client.GetWorkflowHistory(context.Background(), run.GetID(), run.GetRunID(),
 		false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
 
 	var steps []string
@@ -118,7 +124,7 @@ func (s *scenarioState) scheduledSteps() ([]string, error) {
 	return steps, nil
 }
 
-func registerOrderSteps(sc *godog.ScenarioContext) {
+func registerRollbackSteps(sc *godog.ScenarioContext) {
 	// --- starting a saga -----------------------------------------------------
 
 	sc.Step(`^注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
@@ -151,14 +157,14 @@ func registerOrderSteps(sc *godog.ScenarioContext) {
 		}
 
 		deadline := time.Now().Add(30 * time.Second)
-		for !ledger.Held(run.GetRunID(), step) {
+		for !s.order.Held(run.GetRunID(), step) {
 			if time.Now().After(deadline) {
 				return fmt.Errorf("%q never ran, so there is nothing to cancel", step)
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		if err := temporalClient.CancelWorkflow(context.Background(), run.GetID(), run.GetRunID()); err != nil {
+		if err := s.client.CancelWorkflow(context.Background(), run.GetID(), run.GetRunID()); err != nil {
 			return fmt.Errorf("could not cancel the saga: %w", err)
 		}
 		_, err = s.outcome()
@@ -225,12 +231,13 @@ func registerOrderSteps(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^saga は運用者向けにフラグが立つ$`, func(ctx context.Context) error {
-		run, err := stateOf(ctx).currentRun()
+		s := stateOf(ctx)
+		run, err := s.currentRun()
 		if err != nil {
 			return err
 		}
 
-		desc, err := temporalClient.DescribeWorkflowExecution(context.Background(), run.GetID(), run.GetRunID())
+		desc, err := s.client.DescribeWorkflowExecution(context.Background(), run.GetID(), run.GetRunID())
 		if err != nil {
 			return fmt.Errorf("could not describe the execution: %w", err)
 		}
@@ -270,12 +277,13 @@ func registerOrderSteps(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^注文は "([^"]*)" を保持したままである$`, func(ctx context.Context, steps string) error {
-		run, err := stateOf(ctx).currentRun()
+		s := stateOf(ctx)
+		run, err := s.currentRun()
 		if err != nil {
 			return err
 		}
 		for _, step := range split(steps) {
-			if !ledger.Held(run.GetRunID(), step) {
+			if !s.order.Held(run.GetRunID(), step) {
 				return fmt.Errorf("%q should still be held, but it is not", step)
 			}
 		}
@@ -283,13 +291,14 @@ func registerOrderSteps(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^注文は "([^"]*)" を保持していない$`, func(ctx context.Context, steps string) error {
-		run, err := stateOf(ctx).currentRun()
+		s := stateOf(ctx)
+		run, err := s.currentRun()
 		if err != nil {
 			return err
 		}
 		for _, step := range split(steps) {
-			if ledger.Held(run.GetRunID(), step) || pipelineLedger.Held(run.GetRunID(), step) ||
-				childflowLedger.Held(run.GetRunID(), step) || stateLedger.Held(run.GetRunID(), step) {
+			if s.order.Held(run.GetRunID(), step) || s.pipeline.Held(run.GetRunID(), step) ||
+				s.childflow.Held(run.GetRunID(), step) || s.state.Held(run.GetRunID(), step) {
 				return fmt.Errorf("%q is still held, so it was not rolled back", step)
 			}
 		}
@@ -298,7 +307,7 @@ func registerOrderSteps(sc *godog.ScenarioContext) {
 }
 
 func (s *scenarioState) start(in order.Order) error {
-	run, err := temporalClient.ExecuteWorkflow(context.Background(),
+	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "saga-" + in.ID, TaskQueue: order.TaskQueue},
 		order.OrderWorkflow, in)
 	if err != nil {

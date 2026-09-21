@@ -37,7 +37,7 @@ func sampleOrder(id, failAt string) state.Order {
 }
 
 func (s *scenarioState) startState(in state.Order) error {
-	run, err := temporalClient.ExecuteWorkflow(context.Background(),
+	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "state-" + in.ID, TaskQueue: state.TaskQueue},
 		state.StateWorkflow, in)
 	if err != nil {

@@ -17,13 +17,14 @@ import (
 
 func registerExternalSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^在庫ワークフロー "([^"]*)" を起動する$`, func(ctx context.Context, id string) error {
-		run, err := temporalClient.ExecuteWorkflow(context.Background(),
+		s := stateOf(ctx)
+		run, err := s.client.ExecuteWorkflow(context.Background(),
 			client.StartWorkflowOptions{ID: id, TaskQueue: external.TaskQueue},
 			external.InventoryWorkflow, 2*time.Minute)
 		if err != nil {
 			return fmt.Errorf("could not start the inventory workflow: %w", err)
 		}
-		stateOf(ctx).inventory = run
+		s.inventory = run
 		return nil
 	})
 
@@ -38,7 +39,8 @@ func registerExternalSteps(sc *godog.ScenarioContext) {
 
 	sc.Step(`^在庫ワークフロー "([^"]*)" の "([^"]*)" の確保数は "([^"]*)"$`,
 		func(ctx context.Context, id, sku, want string) error {
-			if _, err := stateOf(ctx).outcome(); err != nil {
+			s := stateOf(ctx)
+			if _, err := s.outcome(); err != nil {
 				return err
 			}
 
@@ -51,7 +53,7 @@ func registerExternalSteps(sc *godog.ScenarioContext) {
 			// delivered asynchronously, so give the inventory workflow a moment.
 			deadline := time.Now().Add(20 * time.Second)
 			for {
-				got, err := heldQuantity(id, sku)
+				got, err := s.heldQuantity(id, sku)
 				if err != nil {
 					return err
 				}
@@ -66,8 +68,8 @@ func registerExternalSteps(sc *godog.ScenarioContext) {
 		})
 }
 
-func heldQuantity(workflowID, sku string) (int, error) {
-	value, err := temporalClient.QueryWorkflow(context.Background(), workflowID, "", external.HeldQuery)
+func (s *scenarioState) heldQuantity(workflowID, sku string) (int, error) {
+	value, err := s.client.QueryWorkflow(context.Background(), workflowID, "", external.HeldQuery)
 	if err != nil {
 		return 0, fmt.Errorf("could not query the inventory workflow: %w", err)
 	}
@@ -93,7 +95,7 @@ func (s *scenarioState) startExternal(id, failAt string) error {
 		FailAt:    failAt,
 	}
 
-	run, err := temporalClient.ExecuteWorkflow(context.Background(),
+	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "external-" + id, TaskQueue: external.TaskQueue},
 		external.ExternalWorkflow, in)
 	if err != nil {

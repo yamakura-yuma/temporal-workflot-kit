@@ -4,16 +4,29 @@
 ホストからは `just` で叩くだけで、Go を入れる必要はありません。
 
 ```bash
-just ci              # fmt-check, vet, build, テスト, docs-check
-just test            # ユニットテストと仕様。`go test ./...` 一本
-just spec            # 仕様だけを verbose で（実際の dev server 相手）
+just ci              # fmt-check, vet, build, テスト, docs-check, 仕様
+just test            # ユニットテストだけ。数秒で返る
+just spec            # 仕様だけ（実際の dev server 相手）
 just spec-ui         # 同じ実行だが dev server を残す（履歴を localhost:8233 で読む）
 just docs-check      # docs のコード例と、上流由来のノートの版
 just shell           # コンテナの対話シェル
 ```
 
-仕様は godog で書かれた普通の Go のテストなので、入口は `go test` だけです。`just spec`
-は `go test ./specsteps/ -v` の別名で、落ちたときに読みやすい出力が要るときに使います。
+仕様は godog で書かれた普通の Go のテストなので、入口は `go test` だけです。何がどこに
+書いてあるかは `docs/specs/README.md` が索引になっています。
+
+## 速いループを壊さないこと
+
+`just test` は `go test -short ./...` です。`-short` のとき仕様は自分を skip し、
+dev server を起動しません（`specsteps/suite_test.go` の `TestMain` が `testing.Short()`
+を見て早く返り、`TestFeatures` も先頭で `t.Skip` します）。これがないと、ユニット
+テストを1本直すたびに Temporal が立ち上がり、数秒だったループが十数秒になります。
+
+そのぶん `just ci` は `test` と `spec` の両方を並べています。`test` だけでは仕様が
+走りません。
+
+ビルドタグは使っていません。タグで切るとエディタと `go vet` からそのコードが見えなく
+なるためです。`testing.Short()` なら普通にコンパイルされます。
 
 ## スイートが2つある理由
 
@@ -25,15 +38,15 @@ just shell           # コンテナの対話シェル
 | | 置き場所 | 何を押さえるか |
 | --- | --- | --- |
 | ユニット | `saga/saga_test.go` | API の不変条件。ミリ秒で回る |
-| 仕様 | `docs/specs/` | 外から見える振る舞い。実サーバが要る |
+| 仕様 | `docs/specs/` | 外から見える振る舞い。実サーバが要る。索引は `docs/specs/README.md` |
 
 実サーバでしか確かめられないものは3つあります。キャンセル後もロールバックが走ること、
 補償のアクティビティ ID が履歴にこの順で現れること、補償が失敗したときに検索属性が
 書かれること。後者はキーをサーバに登録しないと書けないので、スイートが起動する dev server
 に登録しています。
 
-`go test ./...` が両方を走らせます。dev server は `specsteps` の `TestMain` が1回だけ
-起動し、ワーカーもそこで立てます。
+dev server は `specsteps` の `TestMain` が1回だけ起動し、ワーカーもそこで立てます。
+`-short` のときは起動しません（上の「速いループを壊さないこと」）。
 
 ## 仕様とコードの対応づけ
 
@@ -86,7 +99,7 @@ just spec -run 'TestFeatures/成功した_saga_は何も取り消さない'
 | パス | 中身 |
 | --- | --- |
 | `saga/` | ライブラリ本体とユニットテスト |
-| `docs/specs/` | 実行される仕様（`.feature`）。結合テストの本体 |
+| `docs/specs/` | 実行される仕様（`.feature`）と、その索引 `README.md`。結合テストの本体 |
 | `specsteps/` | 仕様文と Go を繋ぐ語彙層。そのステップの実装と、サーバとワーカーを起動する `TestMain` |
 | `example/*/` | 仕様が動かす saga。1テーマ1 example（order / pipeline / state / childflow / approval / external） |
 
@@ -96,8 +109,15 @@ dev server の3つで成り立ちます。押さえたい振る舞いは仕様�
 
 `specsteps/` の中身はすべて `_test.go` です。仕様を走らせる以外に使う人はいないので、
 通常パッケージにする理由がありません。仕様の置き場所は godog の既定（`./features`）では
-なく、`specsteps/suite_test.go` の `Paths` が `../docs/specs` を指しています。散文の
-ドキュメントの隣に置くためです。
+なく、`specsteps/suite_test.go` の `Paths` が `../docs/specs` を指しています。仕様は
+仕様書としてまとまっているべきで、`_test.go` の間に散らすと通して読めなくなるためです。
+
+**`specsteps/` という名前と、この2分割はこのリポジトリの発明です。** Go にテスト専用
+ディレクトリの規約はありません。よく引かれる
+[golang-standards/project-layout](https://github.com/golang-standards/project-layout) は
+README 自身が非公式だと書いています。godog の README が使う `features/` サブディレクトリも
+cucumber 側の習慣で、Go の規約ではないので採っていません。既存の規約があるかのように
+読まないでください。
 
 `example/*/` が通常パッケージなのは、`specsteps/` がそれを import するからです。
 `_test.go` に置いたものは他のパッケージから import できません。

@@ -19,13 +19,16 @@ Temporal のワークフローを書くための Go の部品集。今入って�
   example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
   こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
   得た事実の出自と、その版）
-- `docs/specs/` — 日本語の Gherkin（`.feature`）で書かれた実行される仕様。結合テストの
-  本体はこちら。godog が走らせ、スイートがプロセス内に起動する実際の Temporal dev
+- `docs/specs/` — 日本語の Gherkin（`.feature`）で書かれた実行される仕様と、その索引
+  `README.md`。**通して読める仕様書**として扱うので、まずは索引から読む。結合テストの
+  本体でもあり、godog が走らせ、スイートがプロセス内に起動する実際の Temporal dev
   server に対して実行する。コードとの対応づけはステップ文が登録された正規表現に一致
   することだけで、それを検査するのはスイートの `Strict: true`。場所は
   `specsteps/suite_test.go` の `Paths` で決まる（godog の既定は `./features`）
 - `specsteps/` — 仕様文と Go を繋ぐ語彙層。そのステップの Go 実装と、サーバとワーカーを
-  起動する `TestMain`。中身はすべて `_test.go`。理由は `docs/development.md`「置き場所」
+  起動する `TestMain`。中身はすべて `_test.go`。**この2分割と `specsteps` という名前は
+  このリポジトリの発明で、Go の規約ではない**（Go にテスト専用ディレクトリの規約は無い）。
+  理由は `docs/development.md`「置き場所」
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
   契約の実装例でもある。`specsteps/` が import するので通常パッケージに置く
 - `example/approval/` — signal 待ちを `saga.Func` でステップにする例。
@@ -48,15 +51,17 @@ example は1テーマ1個。増やすときもこの単位を守り、`diagram.h
 リビルド無しで反映される。
 
 - `just` — レシピ一覧
-- `just build` / `just vet` / `just test` — Go のビルド、vet、テスト。仕様は godog の
-  普通の Go テストなので、`just test`（`go test ./...`）が仕様まで含む
-- `just spec` — 仕様だけを verbose で実行（実際の dev server 相手）。シナリオは Go の
+- `just build` / `just vet` / `just test` — Go のビルド、vet、ユニットテスト。
+  `just test` は `go test -short ./...` で、**仕様は skip され dev server も起動しない**。
+  速いループを保つため
+- `just spec` — 仕様だけを実行（`-short` 無し、実際の dev server 相手）。シナリオは Go の
   サブテストなので `just spec -run 'TestFeatures/<シナリオ名>'` で1本だけ走らせられる
 - `just spec-ui` — 同じ実行だが dev server を残し、履歴を `http://localhost:8233`
   で読めるようにする。落ちたシナリオを調べるとき
 - `just docs-check` — docs と README のコード例が現行 API と合っているか、上流由来の
   ノートが `go.mod` の SDK 版と合っているか
-- `just ci` — fmt-check, vet, build, テスト, docs-check。変更を出す前に通す
+- `just ci` — fmt-check, vet, build, テスト, docs-check, 仕様。`test` が `-short` なので
+  `spec` を別に並べてある。変更を出す前に通す
 - `just shell` — dev コンテナの対話シェル
 
 ## スキル

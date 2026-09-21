@@ -40,7 +40,7 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 		}
 		prefix := run.GetRunID() + "/"
 
-		iter := temporalClient.GetWorkflowHistory(context.Background(), run.GetID(), run.GetRunID(),
+		iter := s.client.GetWorkflowHistory(context.Background(), run.GetID(), run.GetRunID(),
 			false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
 
 		var started []string
@@ -66,12 +66,13 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^梱包と取り消しが見た冪等キーは一致する$`, func(ctx context.Context) error {
-		if _, err := stateOf(ctx).outcome(); err != nil {
+		s := stateOf(ctx)
+		if _, err := s.outcome(); err != nil {
 			return err
 		}
 
-		pack := childflowLedger.KeySeenBy("pack")
-		unpack := childflowLedger.KeySeenBy("unpack")
+		pack := s.childflow.KeySeenBy("pack")
+		unpack := s.childflow.KeySeenBy("unpack")
 
 		if pack == "" {
 			return errors.New("梱包の子が冪等キーを読めていません")
@@ -84,7 +85,7 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 }
 
 func (s *scenarioState) startChildflow(in childflow.Order) error {
-	run, err := temporalClient.ExecuteWorkflow(context.Background(),
+	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "childflow-" + in.ID, TaskQueue: childflow.TaskQueue},
 		childflow.ChildflowWorkflow, in)
 	if err != nil {

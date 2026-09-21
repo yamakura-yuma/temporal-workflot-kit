@@ -10,8 +10,19 @@ description: >-
 
 `docs/specs/` は日本語の Gherkin（`.feature`）で書かれた仕様で、スイートがプロセス内に
 起動する実際の Temporal dev server に対して実行する。走らせるのは godog で、入口は
-`go test` ひとつ。場所は `specsteps/suite_test.go` の `Paths` が決める（godog の既定は
+`go test`。場所は `specsteps/suite_test.go` の `Paths` が決める（godog の既定は
 `./features`）。
+
+**ここは仕様書である。** 6 本の `.feature` はばらばらのテストファイルではなく、通して
+読める1つの文書として扱う。索引は `docs/specs/README.md`。`rollback.feature` が基本形で、
+残りはその変種という構造になっている。**仕様を足す・直すときは索引も直すこと。**
+`機能:` の下の説明文には、その仕様書の中でその1本がどこに位置するのかを書く。
+
+`docs/specs/`（仕様）と `specsteps/`（ステップ実装）に分かれているのはこのリポジトリの
+発明で、Go の規約ではない。Go にテスト専用ディレクトリの規約は無く、よく引かれる
+golang-standards/project-layout は README 自身が非公式だと書いている。godog の README が
+使う `features/` サブディレクトリも cucumber 側の習慣。既存の規約であるかのように
+書かないこと。
 
 ## どちらのスイートに書くか
 
@@ -51,12 +62,15 @@ specsteps/steps_test.go
 ## 検査は Strict がやる
 
 スイートは `Strict: true` で走る。実装の無いステップ、pending、ambiguous は飛ばされずに
-**`go test` を落とす**。だから対応づけを確かめる専用のコマンドは無い。`just test` か
-`just ci` を通せばよい。
+**`go test` を落とす**。だから対応づけを確かめる専用のコマンドは無い。`just ci` を通せばよい。
+
+**`just test` では仕様は走らない。** `go test -short ./...` で、仕様は `-short` のとき
+自分を skip し dev server も起動しない（速いループを保つため）。仕様を走らせるのは
+`just spec` か `just ci`。ビルドタグは使わない（エディタと vet から見えなくなる）。
 
 ## 道具
 
-- `just spec` — 仕様だけを verbose で走らせる。godog が各シナリオと各ステップを印字する。
+- `just spec` — 仕様を走らせる（`-short` 無し）。godog が各シナリオと各ステップを印字する。
 - `just spec -run 'TestFeatures/<シナリオ名>'` — シナリオは Go のサブテストなので1本だけ
   走らせられる。名前の空白はアンダースコアになる。
 - `just spec-ui` — 同じ実行だが、終わっても dev server を残す。落ちたシナリオの

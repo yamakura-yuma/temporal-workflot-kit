@@ -24,10 +24,11 @@ func registerPipelineSteps(sc *godog.ScenarioContext) {
 
 	sc.Step(`^補償 "([^"]*)" が受け取った前段の ID は "([^"]*)"$`,
 		func(ctx context.Context, step, upstream string) error {
-			if _, err := stateOf(ctx).outcome(); err != nil {
+			s := stateOf(ctx)
+			if _, err := s.outcome(); err != nil {
 				return err
 			}
-			if got := pipelineLedger.Upstream(step); got != upstream {
+			if got := s.pipeline.Upstream(step); got != upstream {
 				return fmt.Errorf("補償 %q が受け取った前段の ID: got %q, want %q", step, got, upstream)
 			}
 			return nil
@@ -35,7 +36,7 @@ func registerPipelineSteps(sc *godog.ScenarioContext) {
 }
 
 func (s *scenarioState) startPipeline(in pipeline.Order) error {
-	run, err := temporalClient.ExecuteWorkflow(context.Background(),
+	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "pipeline-" + in.ID, TaskQueue: pipeline.TaskQueue},
 		pipeline.PipelineWorkflow, in)
 	if err != nil {
