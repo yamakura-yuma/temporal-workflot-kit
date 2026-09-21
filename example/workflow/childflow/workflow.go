@@ -47,13 +47,13 @@ func ChildflowWorkflow(ctx workflow.Context, in activity.Order) (Receipt, error)
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
-	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			w := &fulfillment{in: in, packKey: saga.StepKey(ctx, "pack")}
 
-			saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-			saga.Step(ctx, s, "pack", w.pack, w.unpack)
-			saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+			s.Step(ctx, "reserve", w.reserve, w.unreserve)
+			s.Step(ctx, "pack", w.pack, w.unpack)
+			s.Step(ctx, "ship", w.ship, w.cancelShipment)
 
 			return Receipt{Reservation: w.reservation, Pack: w.packing, Shipment: w.shipment}, nil
 		})

@@ -48,14 +48,14 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
         StartToCloseTimeout: 10 * time.Second,
     })
 
-    return saga.Run(ctx, saga.Options{
+    return saga.RunOrCompensate(ctx, saga.Options{
         CompensationBudget: 5 * time.Minute,
     }, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
         w := &fulfillment{in: in}
 
-        saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-        saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
-        saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+        s.Step(ctx, "reserve", w.reserve, w.unreserve)
+        s.Step(ctx, "charge", w.chargeCard, w.refund)
+        s.Step(ctx, "ship", w.ship, w.cancelShipment)
 
         return w.receipt(), nil
     })
@@ -119,7 +119,7 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 ## 使用方法
 
-デモの後半がそのまま使い方です。`saga.Run` にワークフロー本体を渡し、各ステップを
+デモの後半がそのまま使い方です。`saga.RunOrCompensate` にワークフロー本体を渡し、各ステップを
 `saga.Activity` で書きます。
 
 アクティビティ側には2つだけ約束があります。forward は冪等キーを**原子的に** claim する
@@ -153,8 +153,8 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 | | |
 | --- | --- |
-| `saga.Run(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
-| `saga.Step(ctx, s, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
+| `saga.RunOrCompensate(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
+| `s.Step(ctx, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
 | `saga.StepKey(ctx, name)` | 1回の実行の1ステップに固有の文字列。冪等キーに使う |
 | `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`saga.Func` の中で使う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |

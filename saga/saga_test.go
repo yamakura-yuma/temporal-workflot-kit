@@ -119,7 +119,7 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.Run(ctx, saga.Options{
+	return saga.RunOrCompensate(ctx, saga.Options{
 		CompensationBudget: budget,
 	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		var out []string
@@ -142,7 +142,7 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 			}
 
 			var v string
-			saga.Step(ctx, s, spec.Name, func(ctx workflow.Context) error {
+			s.Step(ctx, spec.Name, func(ctx workflow.Context) error {
 				return workflow.ExecuteActivity(ctx, a.Do, in).Get(ctx, &v)
 			}, undo)
 			out = append(out, v)
@@ -447,7 +447,7 @@ func TestBudgetIsRequired(t *testing.T) {
 	env := ts.NewTestWorkflowEnvironment()
 
 	noBudget := func(ctx workflow.Context) error {
-		_, err := saga.Run(ctx, saga.Options{},
+		_, err := saga.RunOrCompensate(ctx, saga.Options{},
 			func(workflow.Context, *saga.Saga) (int, error) { return 0, nil })
 		return err
 	}
@@ -504,12 +504,12 @@ func mixedWorkflow(ctx workflow.Context) ([]string, error) {
 		}
 	}
 
-	return saga.Run(ctx, saga.Options{
+	return saga.RunOrCompensate(ctx, saga.Options{
 		CompensationBudget: 5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
-		saga.Step(ctx, s, "a", act(a.Do, req{Step: "a"}), act(a.Undo, req{Step: "a"}))
-		saga.Step(ctx, s, "b", child(childDo, req{Step: "b"}), child(childUndo, req{Step: "b"}))
-		saga.Step(ctx, s, "c", act(a.Do, req{Step: "c", Fail: true}), act(a.Undo, req{Step: "c"}))
+		s.Step(ctx, "a", act(a.Do, req{Step: "a"}), act(a.Undo, req{Step: "a"}))
+		s.Step(ctx, "b", child(childDo, req{Step: "b"}), child(childUndo, req{Step: "b"}))
+		s.Step(ctx, "c", act(a.Do, req{Step: "c", Fail: true}), act(a.Undo, req{Step: "c"}))
 		return nil, s.Err()
 	})
 }
@@ -569,11 +569,11 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.Run(ctx, saga.Options{
+	return saga.RunOrCompensate(ctx, saga.Options{
 		CompensationBudget: 5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		if failFirst {
-			saga.Step(ctx, s, "a",
+			s.Step(ctx, "a",
 				func(ctx workflow.Context) error {
 					return workflow.ExecuteActivity(ctx, a.Do, req{Step: "a", Fail: true}).Get(ctx, nil)
 				},
@@ -582,7 +582,7 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 				})
 		}
 		var payload string
-		if err := saga.Step(ctx, s, "wait", waitStep(&payload), nil); err != nil {
+		if err := s.Step(ctx, "wait", waitStep(&payload), nil); err != nil {
 			return "", err
 		}
 		return payload, nil
@@ -644,10 +644,10 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.Run(ctx, saga.Options{
+	return saga.RunOrCompensate(ctx, saga.Options{
 		CompensationBudget: 5 * time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
-		saga.Step(ctx, s, "reserve",
+		s.Step(ctx, "reserve",
 			func(ctx workflow.Context) error {
 				return workflow.ExecuteActivity(ctx, a.Do, req{Step: "reserve", Fail: true}).Get(ctx, nil)
 			},

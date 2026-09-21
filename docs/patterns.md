@@ -23,7 +23,7 @@
 `func(workflow.Context) error` で、中身は普通のワークフローコードです。
 
 ```go
-saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+s.Step(ctx, "reserve", w.reserve, w.unreserve)
 
 func (w *fulfillment) reserve(ctx workflow.Context) error {
     return workflow.ExecuteActivity(ctx, acts.Reserve, ReserveReq{Order: w.in}).Get(ctx, &w.reservation)
@@ -111,14 +111,14 @@ func (w *fulfillment) refund(ctx workflow.Context) error {
 両半分をメソッドにすると、`Run` に渡すクロージャは**1ステップ1行**になります。
 
 ```go
-return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+return saga.RunOrCompensate(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
     w := &fulfillment{in: in}
 
-    saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-    saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
-    saga.Step(ctx, s, "approve", w.approve, nil)
-    saga.Step(ctx, s, "pack", w.pack, w.unpack)
-    saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+    s.Step(ctx, "reserve", w.reserve, w.unreserve)
+    s.Step(ctx, "charge", w.chargeCard, w.refund)
+    s.Step(ctx, "approve", w.approve, nil)
+    s.Step(ctx, "pack", w.pack, w.unpack)
+    s.Step(ctx, "ship", w.ship, w.cancelShipment)
 
     return w.receipt(), nil
 })
@@ -132,7 +132,7 @@ return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, er
 小さい saga なら、その場に書いても読めます。
 
 ```go
-saga.Step(ctx, s, "reserve",
+s.Step(ctx, "reserve",
     func(ctx workflow.Context) error {
         return workflow.ExecuteActivity(ctx, acts.Reserve, req).Get(ctx, &reservation)
     },
@@ -161,7 +161,7 @@ saga.Step(ctx, s, "reserve",
 待つ処理も**ステップにします**。半分はただの関数なので、`AwaitSignal` を呼んで判断するだけです。
 
 ```go
-saga.Step(ctx, s, "approval", w.await, nil)   // 待ったことに取り消しは無いので nil
+s.Step(ctx, "approval", w.await, nil)   // 待ったことに取り消しは無いので nil
 
 func (w *fulfillment) await(ctx workflow.Context) error {
     decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, w.wait())
@@ -199,7 +199,7 @@ saga が人の承認を1時間待って止まることはありません。こ�
 他のワークフローが持っている状態を動かすステップも、同じ形です。補償は打ち消しの signal。
 
 ```go
-saga.Step(ctx, s, "hold", w.hold, w.release)
+s.Step(ctx, "hold", w.hold, w.release)
 
 func (w *fulfillment) hold(ctx workflow.Context) error {
     return workflow.SignalExternalWorkflow(ctx, w.in.Inventory, "", HoldSignal, w.req()).Get(ctx, nil)

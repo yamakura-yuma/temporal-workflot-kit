@@ -6,7 +6,7 @@
 // them.
 //
 // Putting the input and every result on one struct, and making each half of
-// each step a method on it, is what keeps the body of saga.Run to five lines --
+// each step a method on it, is what keeps the body of saga.RunOrCompensate to five lines --
 // one per step, in order. It is also what lets a compensation read what its
 // forward half produced, with no plumbing at all.
 //
@@ -106,15 +106,15 @@ func activityOptions() workflow.ActivityOptions {
 func StateWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions())
 
-	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			w := &fulfillment{in: in}
 
-			saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-			saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
-			saga.Step(ctx, s, "approve", w.approve, nil)
-			saga.Step(ctx, s, "pack", w.pack, w.unpack)
-			saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+			s.Step(ctx, "reserve", w.reserve, w.unreserve)
+			s.Step(ctx, "charge", w.chargeCard, w.refund)
+			s.Step(ctx, "approve", w.approve, nil)
+			s.Step(ctx, "pack", w.pack, w.unpack)
+			s.Step(ctx, "ship", w.ship, w.cancelShipment)
 
 			return w.receipt(), nil
 		})

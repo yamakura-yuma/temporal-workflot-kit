@@ -9,7 +9,7 @@ import "go.temporal.io/sdk/workflow"
 // Get the way you would anywhere else. The library does not wrap any of it, so
 // the activity options you set on the context are the ones that apply.
 //
-//	saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+//	s.Step(ctx, "reserve", w.reserve, w.unreserve)
 //
 //	func (w *fulfillment) reserve(ctx workflow.Context) error {
 //	    return workflow.ExecuteActivity(ctx, a.Reserve, req).Get(ctx, &w.reservation)
@@ -61,7 +61,7 @@ import "go.temporal.io/sdk/workflow"
 // An idempotency key is not this id and is not the library's business: build
 // one from the run and the step name and put it in the request, where the
 // service you are calling can enforce it. See docs/activity-contract.md.
-func Step(ctx workflow.Context, s *Saga, name string, do, undo func(workflow.Context) error) error {
+func (s *Saga) Step(ctx workflow.Context, name string, do, undo func(workflow.Context) error) error {
 	if s.err != nil {
 		return s.err
 	}

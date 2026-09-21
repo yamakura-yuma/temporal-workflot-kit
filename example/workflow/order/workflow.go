@@ -67,15 +67,15 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 		opts.CompensationFailedAttribute = &CompensationFailedAttribute
 	}
 
-	return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+	return saga.RunOrCompensate(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 		w := &fulfillment{in: in.Order}
 
 		// The step errors are ignored on purpose: after the first failure every
 		// later Step is a no-op, and Run fails the workflow with that error
 		// rather than returning the half-filled Receipt this body would
 		// otherwise produce.
-		saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-		saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
+		s.Step(ctx, "reserve", w.reserve, w.unreserve)
+		s.Step(ctx, "charge", w.chargeCard, w.refund)
 
 		// Somewhere to cancel the workflow from the outside. Sleep returns a
 		// cancellation error, which Run turns into a rollback -- on a
@@ -87,7 +87,7 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 			}
 		}
 
-		saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+		s.Step(ctx, "ship", w.ship, w.cancelShipment)
 
 		return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
 	})

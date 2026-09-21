@@ -44,13 +44,13 @@ func PipelineWorkflow(ctx workflow.Context, in activity.Order) (Receipt, error) 
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
-	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			w := &fulfillment{in: in}
 
-			saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-			saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
-			saga.Step(ctx, s, "ship", w.ship, w.cancelShipment)
+			s.Step(ctx, "reserve", w.reserve, w.unreserve)
+			s.Step(ctx, "charge", w.chargeCard, w.refund)
+			s.Step(ctx, "ship", w.ship, w.cancelShipment)
 
 			return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
 		})

@@ -63,16 +63,16 @@ func ApprovalWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
-	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			w := &fulfillment{in: in}
 
-			saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
+			s.Step(ctx, "reserve", w.reserve, w.unreserve)
 
 			// Nothing to undo about having waited, so the compensation is nil.
-			saga.Step(ctx, s, "approval", w.await, nil)
+			s.Step(ctx, "approval", w.await, nil)
 
-			saga.Step(ctx, s, "charge", w.chargeCard, w.refund)
+			s.Step(ctx, "charge", w.chargeCard, w.refund)
 
 			return Receipt{Reservation: w.reservation, Charge: w.charge}, nil
 		})

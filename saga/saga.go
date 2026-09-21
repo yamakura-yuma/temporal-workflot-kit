@@ -56,7 +56,7 @@ type undo struct {
 	run  func(workflow.Context) error
 }
 
-// Run executes body as a saga and compensates it if body fails.
+// RunOrCompensate executes body as a saga and compensates it if body fails.
 //
 // The compensation phase runs on a disconnected context, so it still works when
 // the workflow itself is being canceled -- which is exactly when it matters.
@@ -77,11 +77,11 @@ type undo struct {
 // before returning your own error if you have handled the step failure and
 // mean to replace it.
 //
-// Run deliberately registers no deferred function. A panic in workflow code
-// fails the workflow task and the whole workflow is replayed, so there is
-// nothing to compensate; and calling a blocking workflow API while a panic
-// unwinds deadlocks the coroutine.
-func Run[T any](ctx workflow.Context, o Options, body func(workflow.Context, *Saga) (T, error)) (T, error) {
+// It compensates on the way out of body rather than from a deferred function.
+// A panic in workflow code fails the workflow task and the whole workflow is
+// replayed, so a panic is not a saga failure and there is nothing to undo: a
+// deferred rollback would undo a workflow that is about to run again.
+func RunOrCompensate[T any](ctx workflow.Context, o Options, body func(workflow.Context, *Saga) (T, error)) (T, error) {
 	var zero T
 
 	s, err := newSaga(o)

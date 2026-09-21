@@ -72,7 +72,7 @@ description: >-
 2. アクティビティ側の契約を満たす — 冪等キーを**原子的に claim** し、補償は
    取り消すものが無いときに成功する。書き方と、契約を守っても塞げないことは
    `docs/activity-contract.md`。
-3. `saga.Step(ctx, s, name, fwd, undo, in)` を、saga 内で一意な名前で呼ぶ。
+3. `s.Step(ctx, name, fwd, undo, in)` を、saga 内で一意な名前で呼ぶ。
    `fwd` は `saga.Activity` / `saga.ChildWorkflow` / `saga.Func` の1つ、`undo` は
    対応する `saga.Undo*` か nil。直線的な saga ならステップのエラーは無視してよい。
    `Run` が扱う。

@@ -14,7 +14,7 @@ import (
 // with no compensation, which is what turns "nobody answered" into a failure of
 // the saga and makes the wait skippable once an earlier step has failed:
 //
-//	saga.Step(ctx, s, "approval", w.await, nil)
+//	s.Step(ctx, "approval", w.await, nil)
 //
 //	func (w *fulfillment) await(ctx workflow.Context) error {
 //	    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, w.wait())

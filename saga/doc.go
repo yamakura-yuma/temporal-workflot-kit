@@ -10,12 +10,12 @@
 //	        StartToCloseTimeout: 10 * time.Second,
 //	    })
 //
-//	    return saga.Run(ctx, saga.Options{CompensationBudget: 10 * time.Minute},
+//	    return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: 10 * time.Minute},
 //	        func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 //	            w := &fulfillment{in: in}
 //
-//	            saga.Step(ctx, s, "reserve", w.reserve, w.unreserve)
-//	            saga.Step(ctx, s, "charge", w.charge, w.refund)
+//	            s.Step(ctx, "reserve", w.reserve, w.unreserve)
+//	            s.Step(ctx, "charge", w.charge, w.refund)
 //
 //	            return w.receipt(), nil
 //	        })

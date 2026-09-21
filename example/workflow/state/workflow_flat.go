@@ -30,11 +30,11 @@ import (
 func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions())
 
-	return saga.Run(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			var reservation, charge, approvedBy, packing, shipment string
 
-			saga.Step(ctx, s, "reserve",
+			s.Step(ctx, "reserve",
 				func(ctx workflow.Context) error {
 					return workflow.ExecuteActivity(ctx, acts.Reserve,
 						activity.ReserveReq{Order: in.line()}).Get(ctx, &reservation)
@@ -44,7 +44,7 @@ func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 						activity.ReserveReq{Order: in.line(), Reservation: reservation}).Get(ctx, nil)
 				})
 
-			saga.Step(ctx, s, "charge",
+			s.Step(ctx, "charge",
 				func(ctx workflow.Context) error {
 					return workflow.ExecuteActivity(ctx, acts.Charge,
 						activity.ChargeReq{Order: in.line(), Reservation: reservation}).Get(ctx, &charge)
@@ -54,7 +54,7 @@ func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 						activity.ChargeReq{Order: in.line(), Charge: charge}).Get(ctx, nil)
 				})
 
-			saga.Step(ctx, s, "approve",
+			s.Step(ctx, "approve",
 				func(ctx workflow.Context) error {
 					decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, in.wait())
 					if !ok {
@@ -69,7 +69,7 @@ func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 					return nil
 				}, nil)
 
-			saga.Step(ctx, s, "pack",
+			s.Step(ctx, "pack",
 				func(ctx workflow.Context) error {
 					return workflow.ExecuteActivity(ctx, acts.Pack,
 						activity.PackReq{Order: in.line()}).Get(ctx, &packing)
@@ -79,7 +79,7 @@ func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 						activity.PackReq{Order: in.line(), Pack: packing}).Get(ctx, nil)
 				})
 
-			saga.Step(ctx, s, "ship",
+			s.Step(ctx, "ship",
 				func(ctx workflow.Context) error {
 					return workflow.ExecuteActivity(ctx, acts.Ship,
 						activity.ShipReq{Order: in.line(), Charge: charge, Pack: packing, ApprovedBy: approvedBy}).Get(ctx, &shipment)
