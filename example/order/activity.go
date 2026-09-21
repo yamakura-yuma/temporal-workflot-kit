@@ -5,30 +5,44 @@ import (
 	"fmt"
 	"sync"
 
-	"go.temporal.io/sdk/activity"
-
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
-// Why the activities below are written the way they are.
+// Why the activities below are one line of work each.
 //
 // Temporal's own documentation puts the rule like this: idempotency keys "are
 // enforced by the service you are calling from your Activity, not by the
-// Activity itself" (https://docs.temporal.io/activity-definition). The activity
-// hands the key on; whatever is downstream keeps the record that stops a second
-// attempt from doing the work twice.
+// Activity itself" (https://docs.temporal.io/activity-definition).
 //
-// So the shape of an activity follows its downstream. Downstream here is this
-// demo service's own store, and the key is the primary key of the business row,
-// which is the common case and the simplest: writing the row is claiming the
-// key, one operation, with no window in between. That is why a failure below
-// needs no cleanup. It fails before it writes, so there is no row.
+// So an activity has one job: read the key, and hand it across the boundary
+// with the business arguments. That is what every activity below does.
 //
-// The other two cases are shorter than this one. If the downstream is an
-// external API that accepts an idempotency key, pass the key in its header and
-// keep no store here at all. Only a downstream that is an external API and is
-// not idempotent needs the careful version -- claim the key, call, release the
-// key if the call failed.
+// What happens to the key on the other side is the service's business, and it
+// has three shapes. If the service is your own database, the key is a UNIQUE
+// column and one INSERT ... ON CONFLICT (idem_key) DO NOTHING RETURNING id is
+// the work and the claim at once. If it is an external API with an
+// idempotency-key header, you pass the key and it deduplicates. Only a
+// downstream with neither leaves the activity doing the careful version --
+// claim the key, call, release the key if the call failed -- and that is the
+// case to design your way out of, not the one to copy.
+//
+// The warehouse, the payment gateway and the carrier below are those services,
+// faked in this process. Read them as systems on the other side of a network
+// boundary: what matters is what the activities hand them, not how they are
+// implemented, so their bodies can be skipped.
+//
+// Be exact about what they guarantee: a call repeated under an idempotency key
+// they have already seen writes no second record and returns the first id.
+// That is not the same as the work happening exactly once. Here the two
+// coincide, because writing the record is the work. A service that called
+// something outside itself and then recorded the result could die in between
+// and make that outside call twice -- the gap docs/activity-contract.md
+// describes, and the reason the first case above, one statement against your
+// own database, has none.
+//
+// Their bodies ignore most of the business arguments they are handed. A real
+// one would not; the arguments are here because handing them over is the
+// activity's job.
 
 // Order is the workflow input. The Fail* fields exist so a test can force a
 // particular failure; everything else is what a real order would carry.
@@ -70,74 +84,136 @@ type (
 	}
 )
 
-// Store is this demo service's database: the reservations, charges and
-// shipments it has actually made, each row written under the idempotency key
-// of the activity that made it.
-//
-// In production this is one table with a UNIQUE constraint on the key column,
-// and insert below is
-//
-//	INSERT ... ON CONFLICT (idem_key) DO NOTHING RETURNING id
-//
-// -- a single statement, which is the whole point: the write and the claim
-// cannot come apart. Being a map in this process is only honest for an example.
-// Its shape is not a simplification.
-//
-// It is a type of its own rather than fields on Activities because a worker
-// registers every exported method of the struct it is given as an activity, so
-// a query method there would be rejected as a malformed activity.
-type Store struct {
-	mu   sync.Mutex
-	rows map[string]string // idempotency key -> the id of the row stored under it
+// Services is what a worker is given: the fake systems the activities call.
+type Services struct {
+	Warehouse *warehouse
+	Payments  *payments
+	Carrier   *carrier
 }
 
-// NewStore returns an empty Store.
-func NewStore() *Store { return &Store{rows: map[string]string{}} }
-
-// insert writes a row under key and returns its id. When a row is already
-// there -- a retried attempt, or a second attempt still in flight after a
-// timeout -- the id from the first write comes back and nothing is written.
-//
-// Holding the lock across the read and the write is what the UNIQUE constraint
-// would do for a real store. Checking whether the key is taken and then writing
-// is not equivalent: two attempts of the same activity can be in here at once.
-//
-// There is no second result saying which of the two happened, because no caller
-// has any use for one. The id is the same either way.
-func (s *Store) insert(key, id string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.rows[key]; ok {
-		return existing
+// NewServices returns the three systems, each empty.
+func NewServices() *Services {
+	return &Services{
+		Warehouse: &warehouse{holds: map[string]string{}},
+		Payments:  &payments{charges: map[string]string{}},
+		Carrier:   &carrier{bookings: map[string]string{}},
 	}
-	s.rows[key] = id
+}
+
+// warehouse is the stock system. It runs in this process, but it is here to be
+// read as a system across a network boundary; the body is not the point.
+//
+// It guarantees this much and no more: a second Hold under a key it has
+// already seen holds no more stock and returns the id of the first
+// reservation.
+type warehouse struct {
+	mu    sync.Mutex
+	holds map[string]string // idempotency key -> reservation id
+}
+
+// Hold reserves stock for an order and returns the reservation id. Called
+// twice with the same key it holds nothing the second time and returns the
+// first reservation.
+func (w *warehouse) Hold(key, order, sku string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if id, ok := w.holds[key]; ok {
+		return id
+	}
+	id := "res-" + order
+	w.holds[key] = id
 	return id
 }
 
-// delete removes the row under key, reporting whether there was one. This is
-// business, not bookkeeping: it is how a reservation is released and a charge
-// refunded, which is why a compensation calls it and a failed forward activity
-// does not.
-func (s *Store) delete(key string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.rows[key]; !ok {
+// Release frees the stock held under key, reporting whether anything was held.
+func (w *warehouse) Release(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, ok := w.holds[key]; !ok {
 		return false
 	}
-	delete(s.rows, key)
+	delete(w.holds, key)
+	return true
+}
+
+// payments is the payment gateway.
+//
+// It guarantees this much and no more: a second Charge under a key it has
+// already seen takes no more money and returns the id of the first charge.
+type payments struct {
+	mu      sync.Mutex
+	charges map[string]string // idempotency key -> charge id
+}
+
+// Charge takes money for an order and returns the charge id. The key is what
+// stops a retried activity from charging the card twice.
+func (p *payments) Charge(key, order string, amount int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if id, ok := p.charges[key]; ok {
+		return id
+	}
+	id := "chg-" + order
+	p.charges[key] = id
+	return id
+}
+
+// Refund reverses the charge made under key, reporting whether there was one.
+func (p *payments) Refund(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.charges[key]; !ok {
+		return false
+	}
+	delete(p.charges, key)
+	return true
+}
+
+// carrier is the shipping company.
+//
+// It guarantees this much and no more: a second Book under a key it has
+// already seen books nothing further and returns the id of the first shipment.
+type carrier struct {
+	mu       sync.Mutex
+	bookings map[string]string // idempotency key -> shipment id
+}
+
+// Book books a shipment for an order and returns the shipment id.
+func (c *carrier) Book(key, order string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if id, ok := c.bookings[key]; ok {
+		return id
+	}
+	id := "shp-" + order
+	c.bookings[key] = id
+	return id
+}
+
+// Cancel cancels the shipment booked under key, reporting whether there was
+// one.
+func (c *carrier) Cancel(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.bookings[key]; !ok {
+		return false
+	}
+	delete(c.bookings, key)
 	return true
 }
 
 // Activities is the worked example of the contract the saga package puts on
-// activities: let the downstream enforce the idempotency key, and succeed when
-// a compensation finds nothing to undo.
+// activities: hand the idempotency key to the service that does the work, and
+// succeed when a compensation finds nothing to undo.
 type Activities struct {
-	store *Store
+	warehouse *warehouse
+	payments  *payments
+	carrier   *carrier
 }
 
-// NewActivities returns activities backed by the given store.
-func NewActivities(store *Store) *Activities {
-	return &Activities{store: store}
+// NewActivities returns activities that call the given services.
+func NewActivities(s *Services) *Activities {
+	return &Activities{warehouse: s.Warehouse, payments: s.Payments, carrier: s.Carrier}
 }
 
 // Reserve holds stock for the order.
@@ -146,24 +222,20 @@ func (a *Activities) Reserve(ctx context.Context, req ReserveReq) (string, error
 		return "", fmt.Errorf("reserve: no stock for %s", req.Order.SKU)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	// The row carries the key, so writing the row is the claim.
-	id := a.store.insert(k, "res-"+req.Order.ID)
-	logf(ctx, "reserved %s for %s", id, req.Order.SKU)
-	return id, nil
+	return a.warehouse.Hold(k, req.Order.ID, req.Order.SKU), nil
 }
 
-// Unreserve releases stock held by Reserve. It succeeds when there is nothing
-// to release, which is what lets the saga register it before Reserve runs.
+// Unreserve releases stock held by Reserve.
+//
+// Release returning false -- nothing was held -- is not an error. The saga
+// registers a compensation before its step runs, so a compensation can be
+// asked to undo something that never happened.
 func (a *Activities) Unreserve(ctx context.Context, req ReserveReq) error {
 	if req.Order.FailUndo == "reserve" {
 		return fmt.Errorf("unreserve: warehouse unreachable for %s", req.Order.ID)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	if !a.store.delete(k) {
-		logf(ctx, "unreserve: nothing held for %s, nothing to do", req.Order.ID)
-		return nil
-	}
-	logf(ctx, "released the stock held for %s", req.Order.ID)
+	a.warehouse.Release(k)
 	return nil
 }
 
@@ -173,22 +245,16 @@ func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) 
 		return "", fmt.Errorf("charge: card declined for %s", req.Order.ID)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	id := a.store.insert(k, "chg-"+req.Order.ID)
-	logf(ctx, "charged %d for %s as %s", req.Order.Amount, req.Order.ID, id)
-	return id, nil
+	return a.payments.Charge(k, req.Order.ID, req.Order.Amount), nil
 }
 
-// Refund reverses Charge.
+// Refund reverses Charge, and succeeds when there was no charge to reverse.
 func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 	if req.Order.FailUndo == "charge" {
 		return fmt.Errorf("refund: gateway unreachable for %s", req.Order.ID)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	if !a.store.delete(k) {
-		logf(ctx, "refund: no charge recorded for %s, nothing to do", req.Order.ID)
-		return nil
-	}
-	logf(ctx, "refunded %s", req.Order.ID)
+	a.payments.Refund(k)
 	return nil
 }
 
@@ -198,41 +264,50 @@ func (a *Activities) Ship(ctx context.Context, req ShipReq) (string, error) {
 		return "", fmt.Errorf("ship: no carrier available for %s", req.Order.ID)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	id := a.store.insert(k, "shp-"+req.Order.ID)
-	logf(ctx, "booked shipment %s", id)
-	return id, nil
+	return a.carrier.Book(k, req.Order.ID), nil
 }
 
-// CancelShipment reverses Ship.
+// CancelShipment reverses Ship, and succeeds when nothing was booked.
 func (a *Activities) CancelShipment(ctx context.Context, req ShipReq) error {
 	if req.Order.FailUndo == "ship" {
 		return fmt.Errorf("cancel-shipment: carrier unreachable for %s", req.Order.ID)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	if !a.store.delete(k) {
-		logf(ctx, "cancel-shipment: nothing booked for %s, nothing to do", req.Order.ID)
-		return nil
-	}
-	logf(ctx, "cancelled the shipment for %s", req.Order.ID)
+	a.carrier.Cancel(k)
 	return nil
-}
-
-func logf(ctx context.Context, format string, args ...any) {
-	defer func() { _ = recover() }() // activity.GetLogger panics outside an activity
-	activity.GetLogger(ctx).Info(fmt.Sprintf(format, args...))
 }
 
 // --- for the specifications --------------------------------------------------
 //
-// What follows is here so docs/specs/ can look inside the store from outside
-// the workflow. A production store has no counterpart: nothing in the business
-// code asks whether a given step of a given run still has its row.
+// What follows is here so docs/specs/ can look into the services from outside
+// the workflow. Real systems have no counterpart: nothing in business code asks
+// whether a given step of a given run still has its record.
 
-// Held reports whether a step of a given workflow run still holds its row. A
-// specification uses it to check that a rollback actually undid everything.
-func (s *Store) Held(runID, step string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.rows[runID+"/"+step]
+// Held reports whether any of the services still holds a record for a step of a
+// given workflow run. A specification uses it to check that a rollback actually
+// undid everything.
+func (s *Services) Held(runID, step string) bool {
+	key := runID + "/" + step
+	return s.Warehouse.has(key) || s.Payments.has(key) || s.Carrier.has(key)
+}
+
+func (w *warehouse) has(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, ok := w.holds[key]
+	return ok
+}
+
+func (p *payments) has(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.charges[key]
+	return ok
+}
+
+func (c *carrier) has(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.bookings[key]
 	return ok
 }

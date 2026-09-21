@@ -8,15 +8,29 @@ import (
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
-// A copy of the order example's store, narrowed to one step. It is not what
-// this example is about -- the hold step above it is -- and it is here only so
-// the saga has something to fail at after the hold has been sent.
+// A copy of the order example's payment gateway, and the only service this
+// example calls. It is not what the example is about -- the hold step above it
+// is -- and it is here only so the saga has something to fail at after the hold
+// has been sent.
 //
 // The shape is the one the order example explains at the top of its
-// activity.go: the downstream is this demo service's own database, an
-// in-process map whose key is the idempotency key of the row, so writing the
-// row is claiming the key and an activity that fails before it writes leaves
-// nothing to clean up.
+// activity.go: an idempotency key is "enforced by the service you are calling
+// from your Activity, not by the Activity itself"
+// (https://docs.temporal.io/activity-definition), so the activity reads the key
+// and hands it to the gateway, and that is all it does.
+//
+// Be exact about what they guarantee: a call repeated under an idempotency key
+// they have already seen writes no second record and returns the first id.
+// That is not the same as the work happening exactly once. Here the two
+// coincide, because writing the record is the work. A service that called
+// something outside itself and then recorded the result could die in between
+// and make that outside call twice -- the gap docs/activity-contract.md
+// describes, and the reason the first of the three cases the order example
+// lists, one statement against your own database, has none.
+//
+// Their bodies ignore most of the business arguments they are handed. A real
+// one would not; the arguments are here because handing them over is the
+// activity's job.
 
 // ChargeReq is the input of the charge step.
 type ChargeReq struct {
@@ -25,45 +39,60 @@ type ChargeReq struct {
 	Fail   bool   `json:"fail,omitempty"`
 }
 
-// Store is the demo database behind the charge step. In production it is one
-// table with a UNIQUE constraint on the idempotency key, and insert is
-// INSERT ... ON CONFLICT (idem_key) DO NOTHING RETURNING id.
-type Store struct {
-	mu   sync.Mutex
-	rows map[string]string // idempotency key -> the id of the row stored under it
+// Services is what a worker is given: the fake systems the activities call.
+// There is only one of them here.
+type Services struct {
+	Payments *payments
 }
 
-// NewStore returns an empty Store.
-func NewStore() *Store { return &Store{rows: map[string]string{}} }
+// NewServices returns the payment gateway, empty.
+func NewServices() *Services {
+	return &Services{Payments: &payments{charges: map[string]string{}}}
+}
 
-// insert writes a row under key and returns its id, giving back the id of the
-// row already there if the activity is being retried.
-func (s *Store) insert(key, id string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.rows[key]; ok {
-		return existing
+// payments is the payment gateway. It runs in this process, but it is here to
+// be read as a system across a network boundary; the body is not the point.
+//
+// It guarantees this much and no more: a second Charge under a key it has
+// already seen takes no more money and returns the id of the first charge.
+type payments struct {
+	mu      sync.Mutex
+	charges map[string]string // idempotency key -> charge id
+}
+
+// Charge takes money for an order and returns the charge id. The key is what
+// stops a retried activity from charging the card twice.
+func (p *payments) Charge(key, order string, amount int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if id, ok := p.charges[key]; ok {
+		return id
 	}
-	s.rows[key] = id
+	id := "chg-" + order
+	p.charges[key] = id
 	return id
 }
 
-// delete removes the row under key, reporting whether there was one.
-func (s *Store) delete(key string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.rows[key]; !ok {
+// Refund reverses the charge made under key, reporting whether there was one.
+func (p *payments) Refund(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.charges[key]; !ok {
 		return false
 	}
-	delete(s.rows, key)
+	delete(p.charges, key)
 	return true
 }
 
 // Activities is the saga's activity set.
-type Activities struct{ store *Store }
+type Activities struct {
+	payments *payments
+}
 
-// NewActivities returns activities backed by the given store.
-func NewActivities(store *Store) *Activities { return &Activities{store: store} }
+// NewActivities returns activities that call the given services.
+func NewActivities(s *Services) *Activities {
+	return &Activities{payments: s.Payments}
+}
 
 // Charge takes payment.
 func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) {
@@ -71,13 +100,12 @@ func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) 
 		return "", fmt.Errorf("charge: card declined for %s", req.Order)
 	}
 	k, _ := saga.IdempotencyKey(ctx)
-	// The row carries the key, so writing the row is the claim.
-	return a.store.insert(k, "chg-"+req.Order), nil
+	return a.payments.Charge(k, req.Order, req.Amount), nil
 }
 
-// Refund reverses Charge.
+// Refund reverses Charge, and succeeds when there was no charge to reverse.
 func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 	k, _ := saga.IdempotencyKey(ctx)
-	a.store.delete(k)
+	a.payments.Refund(k)
 	return nil
 }

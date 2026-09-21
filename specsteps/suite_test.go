@@ -45,16 +45,16 @@ const holdEnv = "SPEC_HOLD"
 // specsDir is where the .feature files live, relative to this package.
 const specsDir = "../docs/specs"
 
-// suite is what the whole run shares. The workers hold these store instances
-// for their lifetime, so the stores cannot be per-scenario; handing them to
+// suite is what the whole run shares. The workers hold these service instances
+// for their lifetime, so the services cannot be per-scenario; handing them to
 // each scenario through its context is what keeps them out of package-level
 // variables.
 type suite struct {
 	client    client.Client
-	order     *order.Store
-	pipeline  *pipeline.Store
-	childflow *childflow.Store
-	state     *state.Store
+	order     *order.Services
+	pipeline  *pipeline.Services
+	childflow *childflow.Services
+	state     *state.Services
 }
 
 // suiteRun is the one piece of package-level state left: what TestMain has to
@@ -112,7 +112,7 @@ func TestFeatures(t *testing.T) {
 			Strict:   true,
 			TestingT: t,
 			// Concurrency stays at the default 1. The scenarios share one set of
-			// stores and one dev server, so they cannot run in parallel.
+			// services and one dev server, so they cannot run in parallel.
 		},
 	}
 
@@ -121,8 +121,8 @@ func TestFeatures(t *testing.T) {
 	}
 }
 
-// initializeScenario registers every step and gives each scenario a store of
-// its own. The store is a pointer, so steps mutate it without handing a new
+// initializeScenario registers every step and gives each scenario a state of
+// its own. That state is a pointer, so steps mutate it without handing a new
 // context back.
 func initializeScenario(s *suite) func(*godog.ScenarioContext) {
 	return func(sc *godog.ScenarioContext) {
@@ -178,14 +178,14 @@ func startSuite() (*suiteRun, error) {
 
 	r.suite = &suite{
 		client:    r.devServer.Client(),
-		order:     order.NewStore(),
-		pipeline:  pipeline.NewStore(),
-		childflow: childflow.NewStore(),
-		state:     state.NewStore(),
+		order:     order.NewServices(),
+		pipeline:  pipeline.NewServices(),
+		childflow: childflow.NewServices(),
+		state:     state.NewServices(),
 	}
 
 	// The order example's activities are shared with the approval example, so
-	// both write to the same store.
+	// both call the same services.
 	orderActivities := order.NewActivities(r.suite.order)
 
 	start := func(name string, register func(w worker.Worker)) error {
@@ -245,7 +245,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(external.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(external.ExternalWorkflow)
 		w.RegisterWorkflow(external.InventoryWorkflow)
-		w.RegisterActivity(external.NewActivities(external.NewStore()))
+		w.RegisterActivity(external.NewActivities(external.NewServices()))
 	}); err != nil {
 		return r, err
 	}
