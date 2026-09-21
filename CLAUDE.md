@@ -13,10 +13,10 @@ Temporal のワークフローを書くための Go の部品集。今入って�
 
 ## レイアウト
 
-- `saga/` — ライブラリ本体。`Run` がロールバックを所有し、`saga.Activity` が forward を1つ
-  実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
+- `saga/` — ライブラリ本体。`RunOrCompensate` がロールバックを所有し、`Step` が補償を
+  forward より先に登録する。ステップの両半分はただの `func(workflow.Context) error`。ユニットテストは Temporal のインメモリ環境で動く
 - `docs/` — ドキュメント。`design.md`（なぜこの形か）、`patterns.md`（よくある形と
-  example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
+  example への索引）、`interface.md`（アクティビティ側の契約と、塞げていない
   こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
   得た事実の出自と、その版）
 - `docs/specs/` — 日本語の Gherkin（`.feature`）で書かれた実行される仕様と、その索引
@@ -29,16 +29,32 @@ Temporal のワークフローを書くための Go の部品集。今入って�
   起動する `TestMain`。中身はすべて `_test.go`。**この2分割と `specsteps` という名前は
   このリポジトリの発明で、Go の規約ではない**（Go にテスト専用ディレクトリの規約は無い）。
   理由は `docs/development.md`「置き場所」
-- `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
-  契約の実装例でもある。`specsteps/` が import するので通常パッケージに置く
-- `example/approval/` — signal 待ちを `saga.Func` でステップにする例。
-  アクティビティは order のものを使い、待つ部分だけを見せる
-- `example/pipeline/` — 前段の出力が次段の入力になる例
-- `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例
-- `example/childflow/` — ステップが子ワークフローの例（`saga.ChildWorkflow`）
-- `example/external/` — signal で他のワークフローを動かす例（`saga.Func`）
+- `example/activity/` — example のアクティビティ。**ワークフローごとではなく1セット**で、
+  1アクティビティ1ファイル（`reserve.go`、`charge.go`、`ship.go`、`pack.go`）。各ファイルが
+  入力型と forward と補償を持つ。`activity.go` に `Activities` 型と、仕様のための観測窓
+  アクティビティはワークフローではなくワーカーに属するもので、同じ `Reserve` を
+  order / pipeline / childflow / state が呼ぶ。ディレクトリの形でそれを見せている。
+  **状態を持たせないこと**。下流への書き込みはアクティビティの副作用ではなく仕事
+  そのもので、記録は下流のもの。仕様が見るのはワークフロー履歴であって、
+  アクティビティの自己申告ではない
+- `example/workflow/` — ワークフロー。テーマごとに1パッケージで、中身は `workflow.go` と
+  `diagram.html` だけ。**1パッケージにまとめない**（`TaskQueue`、`Order`、`Receipt` が
+  6組ぶつかって全部に接頭辞が要るため）
+  - `order/` — 基本形の saga（reserve, charge, ship）。まずこれを読む
+  - `approval/` — signal 待ちをステップの forward にする例。自前のアクティビティは
+    持たない
+  - `pipeline/` — 前段の出力が次段の入力になる例。`ChargeReq.Reservation` を埋めるのが
+    その主題で、埋めないのが `order/`
+  - `state/` — 大きな入力を state 構造体とメソッドで細い入力に射影し、saga の本体を短く
+    保つ例。5ステップ（うち1つは signal 待ち）あり、同じ saga を素の形で書いた
+    `workflow_flat.go` を並べて置く。仕様が両方を動かして同じ結果になることを確かめる
+  - `childflow/` — forward を子ワークフロー、取り消しをアクティビティで実行する例
+  - `external/` — signal で他のワークフローを動かす例
 
 example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。
+ワークフローの入口は `workflow.go`。アクティビティを足すときは `example/activity/` に
+1ファイル増やし、既存のものを写さない。入力型も example ごとに分けない
+（`ChargeReq` が1つあり、使う example が `Reservation` を埋める）。
 
 ここにアプリケーションは無く、`internal/` も無い。このリポジトリはライブラリであり、
 `internal/` に置いたライブラリはモジュールの外から import できないため。

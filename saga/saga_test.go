@@ -3,12 +3,10 @@ package saga_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -24,40 +22,31 @@ type req struct {
 	Fail bool   `json:"fail"`
 }
 
-// recorder captures the order activities ran in and the idempotency key each
-// one saw. Activities run on their own goroutines in the test environment, so
-// it is guarded.
+// recorder captures the order activities ran in. Activities run on their own
+// goroutines in the test environment, so it is guarded.
 type recorder struct {
 	mu    sync.Mutex
 	calls []string
-	keys  map[string]string
 }
 
-func newRecorder() *recorder { return &recorder{keys: map[string]string{}} }
+func newRecorder() *recorder { return &recorder{} }
 
-func (r *recorder) record(call string, key string) {
+func (r *recorder) record(call string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, call)
-	r.keys[call] = key
 }
 
-func (r *recorder) snapshot() ([]string, map[string]string) {
+func (r *recorder) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	calls := append([]string(nil), r.calls...)
-	keys := map[string]string{}
-	for k, v := range r.keys {
-		keys[k] = v
-	}
-	return calls, keys
+	return append([]string(nil), r.calls...)
 }
 
 type acts struct{ r *recorder }
 
 func (a *acts) Do(ctx context.Context, in req) (string, error) {
-	key, _ := saga.IdempotencyKey(ctx)
-	a.r.record("do:"+in.Step, key)
+	a.r.record("do:" + in.Step)
 	if in.Fail {
 		return "", errors.New("forward failed: " + in.Step)
 	}
@@ -65,14 +54,12 @@ func (a *acts) Do(ctx context.Context, in req) (string, error) {
 }
 
 func (a *acts) Undo(ctx context.Context, in req) error {
-	key, _ := saga.IdempotencyKey(ctx)
-	a.r.record("undo:"+in.Step, key)
+	a.r.record("undo:" + in.Step)
 	return nil
 }
 
 func (a *acts) UndoFails(ctx context.Context, in req) error {
-	key, _ := saga.IdempotencyKey(ctx)
-	a.r.record("undo:"+in.Step, key)
+	a.r.record("undo:" + in.Step)
 	return errors.New("compensation failed: " + in.Step)
 }
 
@@ -92,38 +79,49 @@ type plan struct {
 	SleepAfter int `json:"sleep_after"`
 	// ReturnNil makes the body return a nil error even when a step failed,
 	// i.e. the caller forgot to check.
-	ReturnNil bool          `json:"return_nil"`
-	Budget    time.Duration `json:"budget"`
+	ReturnNil bool `json:"return_nil"`
+	// Parallel and ContinueWithError go straight to saga.Options.
+	Parallel          bool `json:"parallel"`
+	ContinueWithError bool `json:"continue_with_error"`
 }
 
 func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 	var a *acts // nil receiver: only the method's name is used
 
-	budget := p.Budget
-	if budget == 0 {
-		budget = 5 * time.Minute
-	}
-
 	// One attempt per activity: these tests assert on the exact sequence of
 	// calls, and the SDK's default retry policy would repeat the failures.
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  budget,
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
+	return saga.RunOrCompensate(ctx, saga.Options{
+		ParallelCompensation: p.Parallel,
+		ContinueWithError:    p.ContinueWithError,
 	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		var out []string
 		for i, spec := range p.Steps {
-			undo := a.Undo
+			in := req{Step: spec.Name, Fail: spec.Fail}
+
+			undoFn := a.Undo
 			switch {
 			case spec.NoUndo:
-				undo = nil
+				undoFn = nil
 			case spec.UndoFails:
-				undo = a.UndoFails
+				undoFn = a.UndoFails
 			}
 
-			v, _ := saga.Step(ctx, s, spec.Name, saga.Activity(a.Do), saga.UndoActivity(undo), req{Step: spec.Name, Fail: spec.Fail})
+			var undo func(workflow.Context) error
+			if undoFn != nil {
+				undo = func(ctx workflow.Context) error {
+					return workflow.ExecuteActivity(ctx, undoFn, in).Get(ctx, nil)
+				}
+			}
+
+			var v string
+			s.Step(ctx, spec.Name, func(ctx workflow.Context) error {
+				return workflow.ExecuteActivity(ctx, a.Do, in).Get(ctx, &v)
+			}, undo)
 			out = append(out, v)
 
 			if p.SleepAfter == i {
@@ -169,7 +167,7 @@ func TestSuccessDoesNotCompensate(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "do:c"}, calls)
 
 	var out []string
@@ -191,72 +189,18 @@ func TestCompensatesInReverseIncludingTheFailedStep(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t,
 		[]string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"},
 		calls)
 }
 
-// A step's forward activity and its compensation must observe the same
-// idempotency key: that is how a compensation finds the work it has to undo.
-//
-// The key is read through the activity's ActivityID, so this only holds when
-// the real activity function runs. A mock set up with .Return(value) replaces
-// the function and would never call IdempotencyKey -- use .Return(fn) or
-// .Run(fn) if you need a mock here.
-func TestForwardAndCompensationShareTheKey(t *testing.T) {
-	env, r := newEnv(t)
-
-	env.ExecuteWorkflow(planWorkflow, plan{
-		Steps:      []stepSpec{{Name: "a"}, {Name: "b", Fail: true}},
-		SleepAfter: -1,
-	})
-	require.True(t, env.IsWorkflowCompleted())
-
-	_, keys := r.snapshot()
-	for _, step := range []string{"a", "b"} {
-		fwd, undo := keys["do:"+step], keys["undo:"+step]
-		require.NotEmpty(t, fwd, "step %s: forward saw no key", step)
-		require.Equal(t, fwd, undo, "step %s: forward and compensation disagree", step)
-		require.True(t, strings.HasSuffix(fwd, "/"+step), "key %q should end in the step name", fwd)
-	}
-	require.NotEqual(t, keys["do:a"], keys["do:b"], "each step needs its own key")
-}
-
-// The key is derived from the run, not from FirstRunID.
-//
-// FirstRunID is preserved across ContinueAsNew, Retry, Cron and Reset, while a
-// saga's step counter starts over in the new run -- so a key built on it would
-// repeat the previous run's keys and every step would look like one that had
-// already been applied. Keying on RunID and the step name avoids both that and
-// the shifting that a positional counter causes when a step is inserted.
-func TestDefaultKeyIsScopedToTheRun(t *testing.T) {
-	var ts testsuite.WorkflowTestSuite
-	env := ts.NewTestWorkflowEnvironment()
-
-	probe := func(ctx workflow.Context) (map[string]string, error) {
-		info := workflow.GetInfo(ctx)
-		return map[string]string{
-			"key":        saga.DefaultKey(ctx, "charge"),
-			"runID":      info.WorkflowExecution.RunID,
-			"firstRunID": info.FirstRunID,
-		}, nil
-	}
-	env.RegisterWorkflow(probe)
-	env.ExecuteWorkflow(probe)
-	require.NoError(t, env.GetWorkflowError())
-
-	var got map[string]string
-	require.NoError(t, env.GetWorkflowResult(&got))
-
-	require.Equal(t, got["runID"]+"/charge", got["key"])
-	require.NotEmpty(t, got["runID"])
-	require.Contains(t, got["key"], "/", "a purely numeric key can collide with the SDK's default ActivityID")
-
-	// Pins the reason FirstRunID is not used here: the test environment does not
-	// populate it, so a key built on it would be untestable as well as wrong.
-	require.Empty(t, got["firstRunID"])
-}
+// The library no longer gives the two halves of a step a shared idempotency
+// key, and no longer names the activities a step starts. It does not touch
+// ActivityID at all: a key belongs in the request the caller sends, and a
+// readable history is the caller's to arrange. What used to be checked here now
+// lives where it belongs -- docs/specs/childflow.feature checks that a workflow
+// hands both halves of its packing step the same key.
 
 // A body that returns nil after a step failed must still fail the workflow and
 // compensate. Without this, forgetting one error check completes the workflow
@@ -275,7 +219,7 @@ func TestNilErrorFromBodyStillCompensates(t *testing.T) {
 	require.Error(t, err, "a failed step must fail the workflow even if the body returned nil")
 	require.Contains(t, err.Error(), "forward failed: b")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "undo:b", "undo:a"}, calls,
 		"step c must be skipped, and a and b compensated")
 
@@ -301,7 +245,7 @@ func TestCompensatesAfterCancellation(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "undo:a"}, calls,
 		"the compensation for step a must run despite the cancellation")
 }
@@ -339,52 +283,9 @@ func TestCompensationFailureKeepsTypeAndCause(t *testing.T) {
 	require.Contains(t, err.Error(), "compensation did not finish cleanly")
 	require.NotNil(t, appErr.Unwrap(), "the original failure must stay in the cause chain")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "undo:b", "undo:a"}, calls,
 		"a failing compensation must not stop the ones still queued")
-}
-
-// When the compensation budget runs out, the compensations that never ran are
-// reported rather than silently dropped.
-func TestBudgetExhaustionReportsSkippedSteps(t *testing.T) {
-	env, r := newEnv(t)
-
-	// The compensation for "b" takes longer than the whole budget, leaving
-	// nothing for "a".
-	//
-	// In production each compensation's ScheduleToCloseTimeout is also clamped
-	// to the remaining budget, so one of them cannot run past it; the test
-	// environment does not apply that timeout to a delayed mock, so what this
-	// test pins is the accounting -- a compensation that never ran is reported,
-	// not dropped.
-	env.OnActivity("Undo", mock.Anything, mock.Anything).
-		After(10 * time.Minute).
-		Return(nil)
-
-	env.ExecuteWorkflow(planWorkflow, plan{
-		Steps:      []stepSpec{{Name: "a"}, {Name: "b", Fail: true}},
-		SleepAfter: -1,
-		Budget:     time.Minute,
-	})
-
-	require.True(t, env.IsWorkflowCompleted())
-	err := env.GetWorkflowError()
-	require.Error(t, err)
-
-	var appErr *temporal.ApplicationError
-	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %T: %v", err, err)
-	require.Equal(t, saga.CompensationFailedType, appErr.Type())
-
-	var report saga.CompensationReport
-	require.NoError(t, appErr.Details(&report))
-	require.Equal(t, []string{"a"}, report.Skipped, "a's compensation should be reported, not dropped")
-	require.Empty(t, report.Failed)
-
-	// The failure that started the rollback is still the cause.
-	require.Contains(t, err.Error(), "forward failed: b")
-
-	calls, _ := r.snapshot()
-	require.Equal(t, []string{"do:a", "do:b"}, calls, "the mocked compensation replaces the real one")
 }
 
 // A step with no compensation is allowed, and leaves nothing to undo.
@@ -399,7 +300,7 @@ func TestStepWithoutCompensation(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "undo:b"}, calls)
 }
 
@@ -417,33 +318,6 @@ func TestDuplicateStepNameFails(t *testing.T) {
 	err := env.GetWorkflowError()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate step name")
-}
-
-// A saga needs a compensation budget: compensations run on a context nothing
-// can cancel from outside, so without one a stuck compensation hangs forever.
-func TestBudgetIsRequired(t *testing.T) {
-	var ts testsuite.WorkflowTestSuite
-	env := ts.NewTestWorkflowEnvironment()
-
-	noBudget := func(ctx workflow.Context) error {
-		_, err := saga.Run(ctx, saga.Options{
-			ActivityOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute},
-		}, func(workflow.Context, *saga.Saga) (int, error) { return 0, nil })
-		return err
-	}
-	env.RegisterWorkflow(noBudget)
-	env.ExecuteWorkflow(noBudget)
-
-	require.True(t, env.IsWorkflowCompleted())
-	require.ErrorContains(t, env.GetWorkflowError(), "CompensationBudget")
-}
-
-// IdempotencyKey must not panic outside an activity, or activities stop being
-// unit-testable without a Temporal environment. activity.GetInfo does panic.
-func TestIdempotencyKeyOutsideAnActivity(t *testing.T) {
-	key, ok := saga.IdempotencyKey(context.Background())
-	require.False(t, ok)
-	require.Empty(t, key)
 }
 
 // --- child workflow steps ----------------------------------------------------
@@ -478,14 +352,24 @@ func mixedWorkflow(ctx workflow.Context) ([]string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
-		saga.Step(ctx, s, "a", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "a"})
-		saga.Step(ctx, s, "b", saga.ChildWorkflow(childDo), saga.UndoChildWorkflow(childUndo), req{Step: "b"})
-		saga.Step(ctx, s, "c", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "c", Fail: true})
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
+	act := func(fn, in any) func(workflow.Context) error {
+		return func(ctx workflow.Context) error {
+			return workflow.ExecuteActivity(ctx, fn, in).Get(ctx, nil)
+		}
+	}
+	child := func(fn, in any) func(workflow.Context) error {
+		return func(ctx workflow.Context) error {
+			return workflow.ExecuteChildWorkflow(ctx, fn, in).Get(ctx, nil)
+		}
+	}
+
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
+		s.Step(ctx, "a", act(a.Do, req{Step: "a"}), act(a.Undo, req{Step: "a"}))
+		s.Step(ctx, "b", child(childDo, req{Step: "b"}), child(childUndo, req{Step: "b"}))
+		s.Step(ctx, "c", act(a.Do, req{Step: "c", Fail: true}), act(a.Undo, req{Step: "c"}))
 		return nil, s.Err()
 	})
 }
@@ -508,29 +392,44 @@ func TestChildWorkflowCompensatesInOneOrder(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, keys := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t,
 		[]string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"},
 		calls,
 		"the child workflow step must take its place in the one reverse order")
-
-	// The child's halves run activities of their own, so the key those
-	// activities see is the child's, not the saga step's. What the saga
-	// guarantees is that the two children are named for the same step.
-	require.NotEmpty(t, keys["do:b"])
-	require.NotEmpty(t, keys["undo:b"])
 }
 
 // --- waiting for a signal ----------------------------------------------------
 
 // waitStep is the wait written the way the library intends: a step of its own,
 // which decides for itself what a missing signal means.
-func waitStep(ctx workflow.Context, _ struct{}) (string, error) {
-	payload, arrived := saga.AwaitSignal[string](ctx, "never", time.Hour)
-	if !arrived {
-		return "", temporal.NewApplicationError("nobody answered", "NoAnswer", nil)
+// awaitSignal is what the library used to export. It is a plain SDK idiom, so
+// the tests carry their own copy rather than the package doing it for everyone.
+func awaitSignal[T any](ctx workflow.Context, name string, timeout time.Duration) (T, bool) {
+	var payload T
+	arrived := false
+
+	selector := workflow.NewSelector(ctx)
+	selector.AddReceive(workflow.GetSignalChannel(ctx, name),
+		func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &payload)
+			arrived = true
+		})
+	selector.AddFuture(workflow.NewTimer(ctx, timeout), func(workflow.Future) {})
+	selector.Select(ctx)
+
+	return payload, arrived
+}
+
+func waitStep(out *string) func(workflow.Context) error {
+	return func(ctx workflow.Context) error {
+		payload, arrived := awaitSignal[string](ctx, "never", time.Hour)
+		if !arrived {
+			return temporal.NewApplicationError("nobody answered", "NoAnswer", nil)
+		}
+		*out = payload
+		return nil
 	}
-	return payload, nil
 }
 
 // awaitWorkflow waits an hour for a signal that never comes. When failFirst is
@@ -539,15 +438,24 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
+
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		if failFirst {
-			saga.Step(ctx, s, "a", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "a", Fail: true})
+			s.Step(ctx, "a",
+				func(ctx workflow.Context) error {
+					return workflow.ExecuteActivity(ctx, a.Do, req{Step: "a", Fail: true}).Get(ctx, nil)
+				},
+				func(ctx workflow.Context) error {
+					return workflow.ExecuteActivity(ctx, a.Undo, req{Step: "a"}).Get(ctx, nil)
+				})
 		}
-		return saga.Step(ctx, s, "wait", saga.Func(waitStep), nil, struct{}{})
+		var payload string
+		if err := s.Step(ctx, "wait", waitStep(&payload), nil); err != nil {
+			return "", err
+		}
+		return payload, nil
 	})
 }
 
@@ -589,7 +497,7 @@ func TestInlineStepSkipsAfterAFailedStep(t *testing.T) {
 	require.ErrorContains(t, env.GetWorkflowError(), "forward failed: a",
 		"and the earlier failure is what gets reported")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "undo:a"}, calls,
 		"and the rollback should still happen")
 }
@@ -597,23 +505,28 @@ func TestInlineStepSkipsAfterAFailedStep(t *testing.T) {
 // --- which error is reported -------------------------------------------------
 
 // maskWorkflow is the shape example/approval has without a guard on s.Err():
-// a step fails, AwaitSignal returns at once, and the body reports the missing
+// a step fails, the wait returns at once, and the body reports the missing
 // signal as the failure.
 func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 	var a *acts
 	once := &temporal.RetryPolicy{MaximumAttempts: 1}
 
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions:     workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationOptions: workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once},
-		CompensationBudget:  5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
-		saga.Step(ctx, s, "reserve", saga.Activity(a.Do), saga.UndoActivity(a.Undo), req{Step: "reserve", Fail: true})
+	ctx = workflow.WithActivityOptions(ctx,
+		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-		_, ok := saga.AwaitSignal[string](ctx, "approval", time.Second)
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
+		s.Step(ctx, "reserve",
+			func(ctx workflow.Context) error {
+				return workflow.ExecuteActivity(ctx, a.Do, req{Step: "reserve", Fail: true}).Get(ctx, nil)
+			},
+			func(ctx workflow.Context) error {
+				return workflow.ExecuteActivity(ctx, a.Undo, req{Step: "reserve"}).Get(ctx, nil)
+			})
+
+		_, ok := awaitSignal[string](ctx, "approval", time.Second)
 		if !ok {
 			if clear {
-				s.Clear() // 「握って自分のエラーを返す」と宣言する
+				s.ClearErr() // 「握って自分のエラーを返す」と宣言する
 			}
 			return "", temporal.NewApplicationError("nobody reviewed the order in time", "ApprovalDenied", nil)
 		}
@@ -623,7 +536,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 
 // A step's failure outranks an error the body produced afterwards. Without
 // this, a saga whose reservation failed reports "nobody reviewed the order in
-// time", because AwaitSignal returned at once and the body drew the obvious
+// time", because the wait returned at once and the body drew the obvious
 // conclusion from it.
 func TestFirstFailureWins(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
@@ -643,7 +556,7 @@ func TestFirstFailureWins(t *testing.T) {
 	require.NotContains(t, err.Error(), "nobody reviewed",
 		"the body's conclusion was drawn from a skipped wait, not from the truth")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:reserve", "undo:reserve"}, calls)
 }
 
@@ -661,4 +574,85 @@ func TestClearLetsTheBodyReportItsOwnError(t *testing.T) {
 	err := env.GetWorkflowError()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nobody reviewed")
+}
+
+// --- the two Options ---------------------------------------------------------
+
+// By default a failing compensation stops the ones still to run, and they are
+// reported as skipped rather than dropped. This is the Java SDK's default too.
+func TestCompensationStopsAtTheFirstFailure(t *testing.T) {
+	env, r := newEnv(t)
+
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:      []stepSpec{{Name: "a"}, {Name: "b", UndoFails: true}, {Name: "c", Fail: true}},
+		SleepAfter: -1,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	err := env.GetWorkflowError()
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr))
+
+	var report saga.CompensationReport
+	require.NoError(t, appErr.Details(&report))
+	require.Equal(t, []string{"b"}, report.Failed)
+	require.Equal(t, []string{"a"}, report.Skipped, "a never ran and has to be reported")
+
+	calls := r.snapshot()
+	require.Equal(t, []string{"do:a", "do:b", "do:c", "undo:c", "undo:b"}, calls,
+		"a's compensation must not run")
+}
+
+// ContinueWithError runs the rest anyway.
+func TestContinueWithErrorRunsTheRest(t *testing.T) {
+	env, r := newEnv(t)
+
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:             []stepSpec{{Name: "a"}, {Name: "b", UndoFails: true}, {Name: "c", Fail: true}},
+		SleepAfter:        -1,
+		ContinueWithError: true,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(env.GetWorkflowError(), &appErr))
+
+	var report saga.CompensationReport
+	require.NoError(t, appErr.Details(&report))
+	require.Equal(t, []string{"b"}, report.Failed)
+	require.Empty(t, report.Skipped)
+
+	calls := r.snapshot()
+	require.Equal(t, []string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"}, calls)
+}
+
+// ParallelCompensation dispatches every compensation before awaiting any of
+// them, so one failing cannot stop another from being tried -- which is why
+// ContinueWithError has no meaning alongside it. The order they finish in is
+// not promised, so this pins the set rather than the sequence.
+func TestParallelCompensationRunsThemAll(t *testing.T) {
+	env, r := newEnv(t)
+
+	env.ExecuteWorkflow(planWorkflow, plan{
+		Steps:      []stepSpec{{Name: "a"}, {Name: "b", UndoFails: true}, {Name: "c", Fail: true}},
+		SleepAfter: -1,
+		Parallel:   true,
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(env.GetWorkflowError(), &appErr))
+
+	var report saga.CompensationReport
+	require.NoError(t, appErr.Details(&report))
+	require.Equal(t, []string{"b"}, report.Failed)
+	require.Empty(t, report.Skipped, "nothing is skipped: they were all dispatched")
+
+	calls := r.snapshot()
+	require.ElementsMatch(t,
+		[]string{"do:a", "do:b", "do:c", "undo:a", "undo:b", "undo:c"}, calls,
+		"every compensation runs, including the ones after the failure")
 }

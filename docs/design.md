@@ -1,13 +1,13 @@
 # なぜこのライブラリがあるのか
 
 saga は「途中で失敗したら、そこまでにやったことを逆順で取り消す」だけの仕組みです。
-やること自体は単純で、Temporal の公式サンプルにも30行ほどの実装があります。
+やること自体は単純で、配列とループで書けます。
 
 ```go
 var undo []func(workflow.Context) error
 
-// 成功したら、取り消し方を積んでおく
-undo = append(undo, func(c workflow.Context) error { ... })
+// 取り消し方を積んでおく
+undo = append(undo, func(c workflow.Context) error { return release(c, id) })
 
 // 失敗したら、後ろから実行する
 for i := len(undo) - 1; i >= 0; i-- {
@@ -15,11 +15,29 @@ for i := len(undo) - 1; i >= 0; i-- {
 }
 ```
 
-たいていはこれで足ります。ではなぜライブラリがあるのか。この30行が**黙って壊れる場面が
-6つある**からです。どれも本番の異常系でしか出ません。
+Temporal の公式サンプル（[samples-go](https://github.com/temporalio/samples-go/tree/main/saga)）も
+これを `defer` で書いています。たいていはこれで足ります。
 
-以下、1つずつ見ます。どれも「やりたいこと」「素直に書くとこうなる」「そこで何が起きるか」
-「このライブラリだとこう書く」の順です。
+ではなぜライブラリがあるのか。**この十数行が黙って壊れる場面が5つある**からです。どれも
+本番の異常系でしか出ません。6つ目は壊れる話ではなく、壊れたときにどう振る舞わせるかの
+選択肢です。
+
+## 他の SDK はどうしているか
+
+Temporal の SDK のうち、saga の補助を持っているのは2つだけです。
+
+| SDK | 実装 |
+| --- | --- |
+| Java | [`io.temporal.workflow.Saga`](https://github.com/temporalio/sdk-java/blob/master/temporal-sdk/src/main/java/io/temporal/workflow/Saga.java) |
+| PHP | [`Temporal\Workflow\Saga`](https://github.com/temporalio/sdk-php/blob/master/src/Workflow/Saga.php)（Java の移植。doc コメントまで同一） |
+| Go・TypeScript・Python・.NET・Ruby | 無し |
+
+**このライブラリは Java 版の形に、Java 版が利用者に任せている3つを足したもの**です。
+用語も Java に合わせてあります（`ParallelCompensation`、`ContinueWithError`、
+`addCompensation`、`compensate`）。
+
+以下、1つずつ見ます。1〜5 は「やりたいこと」「素直に書くと」「そこで何が起きるか」
+「このライブラリだと」の順で、6 だけは選択肢の説明です。最後に、**意図して手放したもの**をまとめてあります。
 
 ---
 
@@ -32,65 +50,44 @@ for i := len(undo) - 1; i >= 0; i-- {
 ### 素直に書くと
 
 ```go
-if err != nil {
-    for i := len(undo) - 1; i >= 0; i-- {
-        undo[i](ctx)   // ← ここで使っている ctx
+defer func() {
+    if err != nil {
+        for i := len(undo) - 1; i >= 0; i-- {
+            undo[i](ctx)          // ← キャンセルされた ctx
+        }
     }
-    return Receipt{}, err
-}
+}()
 ```
 
 ### そこで何が起きるか
 
-`ctx` は**キャンセル済み**です。Temporal では、キャンセルされた context でアクティビティを
-呼ぶと、ワーカーに届く前に即座に失敗が返ります。
+**1本も動きません。** キャンセルされた context の上では、以降の `ExecuteActivity` は
+実行される前に即座に失敗します。ログには補償が失敗した記録だけが並び、在庫は押さえた
+ままになります。
 
-店に例えると、閉店した後に返品に行くようなものです。扉が閉まっているので、何を持って
-行っても受け付けてもらえない。
-
-```
-運用担当者が「キャンセル」を押す
-        ↓
-ワークフローの ctx が閉じる
-        ↓
-undo[i](ctx) を呼ぶ  →  即座に CanceledError。在庫は押さえられたまま
-```
-
-**キャンセルこそ取り消しが一番必要な場面なのに、そこだけ動きません。**
+補償が一番必要な場面が、補償が一番動かない場面でもある、という形です。
 
 ### このライブラリだと
 
-`saga.Run` が、キャンセルの影響を受けない別の context を用意します。裏口の鍵を持っている
-ようなものです。
+`RunOrCompensate` が `workflow.NewDisconnectedContext` で切り離した context を作り、
+その上で補償を回します。切り離した context は親のキャンセルを継承しません。
 
 ```go
-// saga.Run の中でやっていること
 dctx, cancel := workflow.NewDisconnectedContext(ctx)
 defer cancel()
-
-// 取り消しは dctx で実行する。親がキャンセルされても閉じない
 ```
 
-使う側は何も書きません。
-
-```go
-return saga.Run(ctx, opts, func(s *saga.Saga) (Receipt, error) {
-    ...
-})
-```
+PHP SDK も `compensate()` 全体を `Workflow::asyncDetached` で包んでいて、同じ結論に
+達しています。**Java SDK はこれをしていません。**
 
 ### 代わりに気をつけること
 
-裏口の鍵は**外から誰も閉められません**。取り消しが1つ固まると、ワークフローが永久に
-終わらなくなる。なので `CompensationBudget` を必須にしました。
+切り離した context は**外から誰も止められません**。補償が失敗し続けると、止めるものが
+無くなります。Temporal の既定のリトライは無制限なので、補償には
+`ScheduleToCloseTimeout` を必ず設定してください（[sdk-notes.md](sdk-notes.md)）。
 
-```go
-saga.Options{
-    CompensationBudget: 5 * time.Minute,   // 取り消し全体の制限時間
-}
-```
-
-時間切れで実行できなかった取り消しは、消えずに `CompensationReport.Skipped` に残ります。
+ワークフローは**キャンセルしてください。terminate は駄目です。** terminate はワークフロー
+コードを1行も動かさないので、何も補償されません。
 
 ---
 
@@ -98,673 +95,433 @@ saga.Options{
 
 ### やりたいこと
 
-課金がタイムアウトで失敗した。返金してほしい。
+課金アクティビティがタイムアウトした。実際に課金されたかどうかは分からない。分からない
+なら、返金を試してほしい。
 
 ### 素直に書くと
 
 ```go
-err := workflow.ExecuteActivity(ctx, a.Charge, req).Get(ctx, &chg)
+id, err := charge(ctx, req)
 if err != nil {
-    return Receipt{}, err   // 失敗したので、取り消しは積まない
+    return err                                   // ← ここで抜ける
 }
-undo = append(undo, refund)   // ← 成功したときだけ積む
+undo = append(undo, func(c workflow.Context) error { return refund(c, id) })
 ```
 
-一見これで正しく見えます。失敗したなら何も起きていないはず、だから取り消すものも無い。
+Java SDK と PHP SDK の使用例も、この順です。`addCompensation` は forward が成功した
+後に呼ばれます。
 
 ### そこで何が起きるか
 
-その「はず」が違います。**アクティビティがタイムアウトしても、ワーカー側では完走している
-かもしれません。** 結果を返せなかっただけ、という場合があります。
-
-宅配便を頼んで、追跡画面が「不明」のまま10秒経ったとします。届いていないとは限りません。
-配達は済んでいて、画面の更新が遅れているだけかもしれない。
-
-```
-t=0     Charge を 10 秒の制限で開始
-t=0.1   ワーカーが決済ゲートウェイに送信。応答待ち
-t=10    制限時間。ワークフローは「失敗」と受け取る
-        ★ ワーカーは止まらない
-t=10.5  ゲートウェイから 200 が返り、課金が確定する
-```
-
-取り消しを積んでいないので、**この課金は永久に残ります。**
+**取り消しが登録される前に関数を抜けます。** タイムアウトは「起きなかった」ことの証明
+ではありません。ワーカーは動き続けていて、下流への課金は成立しているかもしれない。
+なのに返金は永久に呼ばれません。
 
 ### このライブラリだと
 
-`saga.Step` は、forward を投げる**前**に取り消しを積みます。
+`Step` が、**forward を実行する前に**補償を登録します。
 
 ```go
-chg, _ := saga.Step(ctx, s, "charge",
-    saga.Activity(a.Charge), saga.UndoActivity(a.Refund), req)
-//  ~~~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//  これを投げる前に、        これを積む
+func (s *Saga) Step(ctx workflow.Context, name string, do, undo func(workflow.Context) error) error {
+	if undo != nil {
+		s.addCompensation(name, undo)      // ← 先
+	}
+	if err := do(ctx); err != nil {        // ← 後
+		s.fail(err)
+		return err
+	}
+	return nil
+}
 ```
 
-失敗しても、タイムアウトしても、`Refund` は必ず呼ばれます。
+失敗したステップ自身も補償されます。`docs/specs/rollback.feature` の
+「失敗すると、失敗したステップを含めて逆順に取り消される」がこれを検査しています。
 
 ### 代わりに気をつけること
 
-「実際には起きなかったステップ」に対しても取り消しが呼ばれます。なので**取り消し側は、
-取り消すものが無いときに成功を返す**必要があります。
-
-```go
-func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
-    k, _ := saga.IdempotencyKey(ctx)
-    if !a.release(k) {
-        return nil   // 課金の記録が無い。返すものが無いので、これは成功
-    }
-    return a.gateway.Refund(k)
-}
-```
-
-詳しくは [activity-contract.md](activity-contract.md) に。
+**補償は「取り消すものが無い」ときに成功しなければなりません。** 起きなかったステップに
+対しても呼ばれるためです。そこでエラーを返すと、ロールバック全体が失敗扱いになります。
+詳しくは [interface.md](interface.md)。
 
 ---
 
-## 3. forward と取り消しが、別のものを見てしまう
+## 3. エラーチェックを1つ忘れると、壊れた成功になる
 
 ### やりたいこと
 
-返金したい。でも「どの課金を」返すのかを、返金側が知る必要があります。
+ステップの失敗を、ワークフローの失敗にしたい。
 
 ### 素直に書くと
 
 ```go
-var chg Charge
-err := workflow.ExecuteActivity(ctx, a.Charge, req).Get(ctx, &chg)
-...
-undo = append(undo, func(c workflow.Context) error {
-    return workflow.ExecuteActivity(c, a.Refund, chg.ID).Get(c, nil)
-    //                                           ~~~~~~
-    //                                    forward が返した ID
-})
+res, _ := reserve(ctx, in)     // ← エラーを見落とした
+chg, _ := charge(ctx, in)
+return Receipt{res, chg}, nil  // ← nil を返してしまう
 ```
 
 ### そこで何が起きるか
 
-項目2で、取り消しは forward の**前**に積む必要があると分かりました。でも `chg.ID` は
-forward が返す値です。積む時点ではまだ存在しません。
-
-```
-取り消しを積みたい時点  →  chg.ID はまだ空
-chg.ID が手に入る時点   →  もう遅い（タイムアウトしたら手に入らない）
-```
-
-鶏と卵です。
+**成功として記録されます。** 半分だけ適用された副作用が残り、アラートは鳴りません。
+履歴には「Completed」とだけ書かれます。
 
 ### このライブラリだと
 
-先に**整理券**を配ります。ステップごとに番号を作り、forward と取り消しの両方に同じ番号を
-渡します。番号は forward の結果に依存しないので、実行前に決められます。
+`RunOrCompensate` は、**body が nil を返してもステップが失敗していれば失敗させます**。
+body の戻り値は捨てます。
 
 ```go
-// saga.Step の中でやっていること
-key := ctx の RunID + "/" + ステップ名     // 例: 01a0be.../charge
+out, err := body(ctx, s)
 
-opts.ActivityID = key              // forward に渡す
-undoOpts.ActivityID = key + ":undo" // 取り消しに渡す
-```
-
-アクティビティ側は、どちらも同じ番号を読みます。
-
-```go
-func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) {
-    k, _ := saga.IdempotencyKey(ctx)   // "01a0be.../charge"
-    ...
-}
-
-func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
-    k, _ := saga.IdempotencyKey(ctx)   // 同じ "01a0be.../charge"
-    ...
+if s.err != nil {
+	err = s.err        // 最初の失敗が勝つ
 }
 ```
 
-番号が同じなので、「この番号の課金はもう済んでいるか」「この番号の課金を返す」が書けます。
+**最初の失敗が、body が後から返すエラーより強い**のも同じ理由です。ステップが失敗すると
+以降の `Step` は no-op になり、signal 待ちは即座に返るので、body は結果だけを見て本当では
+ない結論（「誰も承認しなかった」）を出しがちです。根本原因のほうを報告します。
 
-### 既定は RunID とステップ名。`KeyFunc` で変えられる
+握って自分のエラーを返すときだけ `s.ClearErr()` を呼んでください。
 
-#### 土台 — Temporal の想定は2層
+### 代わりに気をつけること
 
-鍵の話に入る前に、上流がどう考えているかを置きます。重複の排除は**2箇所**で行う想定に
-なっています。
+**面倒を見られるのはステップの中だけです。** `s.Err()` が立った後も、ログ・
+`workflow.Sleep`・body に直接書いた分岐は普通に実行されます。ステップの外でゼロ値を使う
+なら、自分で `s.Err()` を見てください。
+
+---
+
+## 4. 取り消しが失敗したとき、原因が消える
+
+### やりたいこと
+
+返金が失敗した。**元の失敗（配送の失敗）と、返金の失敗の両方**を知りたい。
+
+### 素直に書くと
+
+```go
+return errors.Join(cause, compensationErr)
+```
+
+### そこで何が起きるか
+
+**Temporal の履歴では、両方とも読めなくなります。** failure コンバータは具象型に対する
+型スイッチで、`Unwrap() error` を1本だけ辿ります。`errors.Join` が返す型はどの分岐にも
+当たらないので、型名は `joinError` になり、原因の連鎖は落ち、
+`NonRetryableErrorTypes` の照合も効かなくなります（[sdk-notes.md](sdk-notes.md)）。
+
+### このライブラリだと
+
+原因が1本の `ApplicationError` を組み立て、**どのステップが失敗したかは details に**
+載せます。
+
+```go
+temporal.NewApplicationErrorWithOptions(msg, CompensationFailedType,
+    temporal.ApplicationErrorOptions{
+        Cause:        cause,          // 元の失敗はそのまま残る
+        NonRetryable: true,
+        Details:      []any{CompensationReport{Failed: failed, Skipped: skipped}},
+    })
+```
+
+非リトライにしてあるのは、ワークフローレベルのリトライが**半分巻き戻した上から saga を
+やり直す**のを防ぐためです。そこは人間が見る場面です。
+
+Java と PHP は例外を1つ投げるだけで、どのステップだったかは報告しません。
+
+---
+
+## 5. 補償が、取り消す相手を知らない
+
+### やりたいこと
+
+返金したい。だが「どの課金を」返金するのかは、課金が成功して初めて分かる。
+
+### 素直に書くと
+
+補償の入力に、forward の出力を渡そうとします。しかし**補償は forward より先に登録**
+されるので、登録の時点では出力が存在しません。
+
+### そこで何が起きるか
+
+型が合いません。Java SDK は `addCompensation` を forward の後に呼ぶことでこれを回避して
+いますが、それは項目2の穴と引き換えです。
+
+### このライブラリだと
+
+両半分を**同じ構造体のメソッド**にします。補償は、forward が書いたフィールドを読むだけ
+です。
+
+```go
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Charge, req).Get(ctx, &w.charge)
+}
+
+func (w *fulfillment) refund(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Refund,
+        ChargeReq{Charge: w.charge}).Get(ctx, nil)     // ← forward の出力
+}
+```
+
+登録は先、**実行は後**なので、補償が動く時点でフィールドは埋まっています。他の saga 実装
+（MassTransit Courier の `ICompensateActivity<TLog>` など）が「補償ログ」として明示的に
+持ち回るものを、Go では普通の変数が担います。
+
+### 代わりに気をつけること
+
+**forward が返さなかったときは空です。** 下流に書き込んだ直後にタイムアウトすると、出力は
+履歴に残りません。そこを埋めるのが冪等キーで、「このキーで書かれた行を消す」形なら、
+forward が成功していようと途中で落ちていようと同じ1文で足ります。
+
+キーはライブラリが作りません。項目「冪等キーを作らない」を参照してください。
+
+---
+
+## 6. 取り消しの順番と、途中で失敗したときの選択肢
+
+### やりたいこと
+
+補償が1本失敗した。残りをどうするか決めたい。
+
+### このライブラリだと
+
+Java SDK と同じ2つのオプションを、同じ名前で持っています。既定も同じです。
+
+```go
+saga.Options{
+    ParallelCompensation: true,   // 逆順をやめて全部同時に投げる（既定 false）
+    ContinueWithError:    true,   // 1本失敗しても残りを続ける（既定 false）
+}
+```
+
+既定は**逆順**で、**最初の失敗で止めます**。止まったぶんは `CompensationReport.Skipped`
+として報告されるので、落ちたのか元からやっていないのかは区別できます。
+
+### 代わりに気をつけること
+
+**`ContinueWithError` は入れたほうがよい場面が多い**と思います。返金が失敗したからと
+いって、在庫を押さえたままにする理由はあまりありません。`example/workflow/order/` は
+そうしています。
+
+`ParallelCompensation` は**ステップが本当に独立しているときだけ**です。後のステップが前に
+依存しているなら、逆順でないと取り消せません。並列のときは全部を投げてから待つので、
+`ContinueWithError` は意味を持ちません（Java の doc も同じことを書いています）。
+
+---
+
+# 意図して手放したもの
+
+ここから下は「やらないと決めたこと」です。どれも一度は入っていて、外しました。
+
+## `ExecuteActivity` を包まない
+
+ステップの両半分は `func(workflow.Context) error` です。中で何を呼ぶかは利用者が書きます。
+
+```go
+s.Step(ctx, "reserve", w.reserve, w.unreserve)
+
+func (w *fulfillment) reserve(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Reserve, req).Get(ctx, &w.reservation)
+}
+```
+
+以前は `saga.Activity` / `saga.ChildWorkflow` / `saga.Func` と、それぞれの `Undo*` という
+6つの構成子がありました。外した理由は2つです。
+
+**1つ目。Temporal に表現手段があるものを奪っていました。** `saga.Activity` は
+`Options.ActivityOptions` で ctx の設定を丸ごと上書きしていたので、
+`workflow.WithActivityOptions` で設定したタスクキューもリトライポリシーも黙って消えて
+いました。しかも `saga.ChildWorkflow` のほうは ctx から読んでいて、**同じライブラリが同じ
+問いに2つの答えを持っていました**。
+
+**2つ目。Temporal を知っている人にとって、何が起きるか読めませんでした。**
+`saga.Activity(a.Reserve)` を見ても、アクティビティとしてスケジュールされるのか、履歴に
+残るのか、設定が効くのかが分かりません。`workflow.ExecuteActivity(ctx, ...)` なら全部
+分かります。
+
+子ワークフローで実行するのも signal を送るのも、**関数の中身の違い**になりました。
+
+## forward と補償を取り違えても、コンパイラは止めない
+
+**これは後退です。正直に書きます。**
+
+以前は forward が「値とエラー」、補償が「エラーだけ」を返す非対称な型だったので、2つを
+逆に書くとコンパイルが通りませんでした。今はどちらも
+`func(workflow.Context) error` なので、**入れ替えてもコンパイラは何も言いません。**
+
+```go
+s.Step(ctx, "reserve", w.unreserve, w.reserve)   // ← 通ってしまう
+```
+
+引き換えに得たのが、上の「`ExecuteActivity` を包まない」です。両方は取れませんでした。
+
+緩和になっているのは呼び出し側の見た目だけです。両半分を `reserve` / `unreserve` のような
+対の名前のメソッドにしておけば、`s.Step(ctx, "reserve", w.reserve, w.unreserve)` の並びで
+取り違えは目に見えます。example はすべてこの形にしてあります。
+
+## 冪等キーを作らない・渡さない
+
+以前は `RunID + "/" + ステップ名` を導出して `ActivityID` に載せ、アクティビティが
+`saga.IdempotencyKey(ctx)` で読み戻していました。全部外しました。
+
+理由は、**ライブラリにできることが「文字列を1つ作る」だけだった**からです。原子的に
+押さえるのも、保存するのも、下流との契約も、全部利用者側です
+（[interface.md](interface.md)）。そのうえ、鍵を読むために
+**アクティビティが saga ライブラリを import する**必要がありました。アクティビティは
+自分が saga の一部だと知る必要がありません。
+
+今はワークフローが自分で導出し、リクエストに入れて渡します。
+
+```go
+func packKey(ctx workflow.Context) string {
+    return workflow.GetInfo(ctx).WorkflowExecution.RunID + "/pack"
+}
+```
+
+実物: [`example/workflow/childflow/workflow.go`](../example/workflow/childflow/workflow.go)
+
+### 土台: Temporal の想定は2層
+
+外したとはいえ、**何を作るべきか**は上流が決めています。重複の排除は2箇所で行う想定です。
 
 | | どこで弾くか | 道具 |
 | --- | --- | --- |
 | 層1 | ワークフローが立つ前。Temporal サーバ | WorkflowID と Workflow Id Reuse / Conflict Policy |
 | 層2 | アクティビティの中 | 冪等キー（RunID + ActivityID） |
 
-層1では、WorkflowID は業務識別子として扱われます。公式は WorkflowID を
-"meant to be a business-process identifier"（注文番号や顧客番号のようなもの）と位置づけ、
-"Temporal guarantees that there can be at most one Workflow Execution with a given ID
-running at any point in time" としています
+層1では WorkflowID が業務識別子として扱われます。公式は WorkflowID を "meant to be a
+business-process identifier"（注文番号や顧客番号のようなもの）と位置づけ、"Temporal
+guarantees at most one Workflow Execution with a given Workflow Id ... at any point in
+time" としています
 （[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
 
-層2では、冪等キーの作り方まで名指しされています。"You can use a combination of the
-Workflow Run ID and the Activity ID as an idempotency key" で、理由は "this is guaranteed
-to be consistent across retry attempts but unique among Workflow Executions"
+層2では、鍵の作り方まで名指しされています。"You can use a combination of the Workflow Run
+ID and the Activity ID as an idempotency key" で、理由は "guaranteed to be consistent
+across retry attempts but unique across Workflow Executions"
 （[Activity definition](https://docs.temporal.io/activity-definition)）。
 
-#### 既定は発明ではなく、公式推奨そのもの
+**`RunID + ステップ名` は、この層2の推奨そのものです。** このライブラリが決めたことでは
+ありませんでした。だから外しても、利用者が作るべき値は変わりません。
 
-`DefaultKey` は `RunID + "/" + ステップ名` を作り、それをそのステップの `ActivityID` に
-設定します。読み替えると **RunID + ActivityID** で、上の層2の推奨そのものです。ここは
-このライブラリが決めたことではありません。
+### 条件は1つ。鍵の粒度が業務操作の粒度と一致すること
 
-1点だけ公式より進んでいます。**公式の言い方を素朴に取って `ActivityID` を明示しないと、
-SDK が振るのは ScheduleID 由来の10進連番です。** ステップを1つ挿入すると、それ以降の番号が
-全部ずれます。「retry を跨いで一定」は満たしても、「コードを1行足すと変わらない」は満たし
-ません（出典は [上流由来のノート](sdk-notes.md) の `ActivityID` の行）。
-
-このライブラリは `ActivityID` を自分で決定的に決めることでそこを塞いでいます。ステップ名は
-順番を入れ替えても挿入しても変わらないので、連番のずれが起きません。**公式推奨に合わせた
-うえで、素朴に取ると踏む穴を1つ埋めた**、というのが既定の位置づけです。
-
-既定が言っているのは「**この試行が一度だけ**」です。run が変われば鍵も変わります。
-
-#### WorkflowID を鍵にする案は、公式の想定では層1の道具
-
-もう1つの作り方が `WorkflowID + ステップ名` で、こちらは「**この業務操作が一度だけ**」に
-なります。
-
-```go
-saga.Options{
-    KeyFunc: func(ctx workflow.Context, name string) string {
-        return workflow.GetInfo(ctx).WorkflowExecution.ID + "/" + name
-    },
-}
-```
-
-ただし、**二重送信を止めたいだけなら層2まで下りてくる必要はありません。** WorkflowID に
-API の Request ID（コールごとに一意な ID）を入れて Reuse / Conflict Policy を設定すれば、
-重複したリクエストは**ワークフローが立つ前に**サーバが弾きます。それが層1の仕事です。
-二重送信はそこで既に解決しているので、その目的のためだけに層2の鍵まで WorkflowID 由来に
-する理由はありません。
-
-層2まで WorkflowID 由来にして初めて塞がるのは、**同じ WorkflowID の中で run が変わる場合**
-だけです。つまり workflow の retry、reset、continue-as-new。層1は「同じ WorkflowID の
-ワークフローは同時に1本」までしか言っておらず、その1本の中で run が代わることは止めません。
-
-公式も Run Id については、"can change during Workflow Retry"、"you shouldn't rely on the
-current Run Id in your code to make logical choices" と注意しています
-（[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
-既定の鍵はまさにその Run Id に乗っているので、**この注意が当たる場面が、後で見る「ワーカーが
-落ちて補償が走らないまま retry したとき」です。**
-
-#### 条件は1つ。鍵の粒度が業務操作の粒度と一致すること
-
-**冪等キーの粒度は、業務操作の粒度と一致していなければならない。条件はそれだけです。**
-WorkflowID がその粒度なら WorkflowID でよく、そうでなければだめです。
-
-つまりこれは `WorkflowID` という値の良し悪しの話ではなく、**その WorkflowID に何が入って
-いるか**の話です。
+`RunID` でなく `WorkflowExecution.ID` を使うこともできます。判断の基準は1つで、
+**WorkflowID に何が入っているか**です。
 
 | WorkflowID に入っているもの | 業務操作との関係 | 鍵に使えるか |
 | --- | --- | --- |
-| API の Request ID（コールごとに一意） | ぴったり一致する | **使える。既定より安全** |
-| 注文 ID。同じ注文に複数回ワークフローを起動しうる運用 | 粗い | 2回目以降が全ステップ skip する |
-| cron のワークフロー（WorkflowID がスケジュール単位で固定） | 粗い | 2日目以降が全ステップ skip する |
+| API の Request ID（コールごとに一意） | ぴったり一致する | **使える。`RunID` より安全** |
+| 注文 ID（同じ注文に複数回ワークフローを起動しうる） | 粗い | 2回目以降が全ステップ skip する |
+| cron のワークフロー（WorkflowID がスケジュール単位） | 粗い | 2日目以降が全ステップ skip する |
 
-粗い側に外れると、**処理が黙って飛びます**。エラーは出ません。全ステップが「もう済んで
+**粗い側に外れると、処理が黙って飛びます。** エラーは出ません。全ステップが「もう済んで
 いる」と判定され、何もせずに成功が返るだけです。
 
-#### 既定が `RunID` である理由
+`RunID` は必ず「1実行」の粒度なので、業務操作と**同じか、細かい側にしか外れません**。
+細かい側に外れても既定では害が出ません。Temporal のワークフローは既定では retry policy を
+持たない（`StartWorkflowOptions.RetryPolicy` は任意）ので run は1本しかないからです。
 
-ライブラリは、**WorkflowID に何が入っているかを知りません。** それを決めるのは利用者なので、
-粒度が一致しているかどうかをライブラリ側では判定できません。
-
-`RunID` は必ず「1実行」の粒度です。業務操作と**同じか、細かい側にしか外れません。** そして
-細かい側に外れても、既定では害が出ません。Temporal のワークフローは既定では retry policy を
-持たない（`StartWorkflowOptions.RetryPolicy` は任意で、渡さなければ1回失敗したらそこで
-終わる）ので run は1本しかなく、「この試行が一度だけ」と「この業務操作が一度だけ」が同じ
-ことを言っている状態になるからです。
-
-一方、粗い側に外れると処理が黙って飛びます。**既定は「黙って飛ぶ」ほうを避けています。**
-
-粒度が一致していると言えるのは利用者だけです。言えるなら、`KeyFunc` でそう言ってください。
-
-#### 細かい側に外れると、今度は既定のほうが危ない
-
-retry が起きる設定にすると、細かい側の外れが実害になります。WorkflowID は run の連鎖
-（ContinueAsNew・Retry・Cron・Reset）を跨いで同じで RunID だけが変わるので、2つの差が
-出るのは**同じワークフローが2本目の run を作ったとき**、つまり workflow 自身の retry と
-reset のときです。
-
-ワーカーが落ちて補償が走らないまま workflow が retry されると、新しい RunID から新しい鍵が
-生まれます。前の試行が立てた課金は台帳（あるいは下流）に残ったままなのに、新しい鍵では
-「まだ誰も課金していない」と見えるので、**立っている課金の上にもう一度課金します**。
+逆に言うと、**workflow の retry・reset・continue-as-new を有効にすると、細かい側の外れが
+実害になります。** run が変わるたびに鍵が変わるので、補償が走らないまま retry した場合に
+二重実行が起きます。
 
 ```
-run 1  charge で "run1/charge" を claim → 課金が立つ
+run 1  charge で "run1/charge" を押さえる → 課金が立つ
        ワーカーが落ちる。補償は走らない
-run 2  charge で "run2/charge" を claim → 未使用に見える → 二重課金
+run 2  charge で "run2/charge" を押さえる → 未使用に見える → 二重課金
 ```
 
-WorkflowID 由来の鍵なら、鍵は `wf/charge` のまま変わりません。run 2 は前の試行が残したもの
-（業務行、下流の記録、台帳の claim のどれか）を見つけて skip します。逆に**補償が完走して
-いればそれは消えている**ので、run 2 は普通に課金をやり直します。
+そこを塞ぐなら `WorkflowExecution.ID` に寄せます。ただし **`WorkflowIDReusePolicy` も
+セットで決めてください**。既定は `AllowDuplicate` で、完了済みの WorkflowID でも新しい run
+が立ちます（[sdk-notes.md](sdk-notes.md)）。
 
-つまり WorkflowID 由来の鍵は、「**補償できた分はやり直す、できなかった分は触らない**」に
-自然に落ちます。retry を有効にするなら、粒度が一致している限りこちらです。
+`FirstRunID` は使わないでください。ContinueAsNew・Retry・Cron・Reset を跨いで保存される
+点は WorkflowID と同じですが、**値をサーバが決める**ので、意図したかどうかに関わらず2回目
+の run が1回目の鍵を再利用します。意図するなら `WorkflowExecution.ID` を明示してください。
 
-#### WorkflowIDReusePolicy もセットで決める
+連番も駄目です。ステップを挿入すると以降が全部ずれます。
 
-WorkflowID を鍵にするなら、**同じ WorkflowID で2本目の run が立つ条件**も一緒に決める必要が
-あります。`WorkflowIDReusePolicy` の既定は `AllowDuplicate` で、完了済みの WorkflowID なら
-新しい run を受け付けます。
+### 二重送信を止めたいだけなら、層2まで下りる必要はない
 
-効いてくるのは、1本目が失敗して補償まで完走した後です。鍵は同じでも副作用は補償で消えて
-いるので、クライアントが同じ Request ID で API を叩き直して2本目が立つと、業務操作は
-やり直されます。「1回だけ」のつもりで送り直したのに2回実行された、という形になりうる。
-**ステップ単位の鍵が run を跨いで同じでも、業務操作を1回に閉じるのは鍵ではなく起動側の
-方針です。** `RejectDuplicate` にする、あるいは走行中の扱いを `WorkflowIDConflictPolicy` で
-決める、のどちらかが要ります。
+WorkflowID に API の Request ID を入れて Reuse / Conflict Policy を設定すれば、重複した
+リクエストは**ワークフローが立つ前に**サーバが弾きます。それが層1の仕事です。層2まで
+WorkflowID 由来にして初めて塞がるのは、**同じ WorkflowID の中で run が変わる場合**だけ
+です。
 
-#### `KeyFunc` に載る制約
+## アクティビティに名前を付けない
 
-自分で書くなら3つ守ってください。
+`ActivityID` を `<RunID>/<ステップ名>` にすると Temporal UI で履歴が読みやすくなるので、
+一度入れていました。外したのは、**「両半分はただのワークフローコード」という前提と
+矛盾する制約**を持ち込むからです。`ActivityID` は1つのワークフロー実行内で重複できないので、
+1ステップで2本のアクティビティを起動できなくなります。加えて、利用者が `do` の中で
+options を丸ごと差し替えると ID が黙って消えます。
 
-- **決定的であること。** 同じ run の同じステップ名から、リプレイ後も同じ鍵が出ること
-- **`FirstRunID` を使わないこと。** これも ContinueAsNew・Retry・Cron・Reset を跨いで残る
-  ので、結果は WorkflowID 由来の鍵とほぼ同じになります。違うのは**選べるかどうか**です。
-  値はサーバが振るので中身に意味を持たせられず、同じ鍵がいつ生まれ直すかを
-  `WorkflowIDReusePolicy` のような形で決める手段もありません。「業務操作が一度だけ」が
-  欲しいなら、自分で中身を決められる WorkflowID を使ってください
-- **数字だけにしないこと。** `ActivityID` を明示しないアクティビティには SDK が純粋な10進数
-  を振るので、数字だけの鍵は無関係なアクティビティとぶつかります。Request ID が数字だけ
-  でも `+ "/" + ステップ名` が付くので、この制約は満たします
+Java も PHP も `ActivityID` には触っていません。読みやすい履歴が欲しければ、利用者が
+`ActivityOptions.ActivityID` を自分で設定できます。
 
-3つ目は、SDK 既定の連番と同じ穴です。自分で連番（1番目、2番目...）を振る案も、決定的では
-ありますが同じ理由で駄目で、ステップを1つ挿入すると以降が全部ずれます。ステップ名なら、
-挿入しても順番を入れ替えても変わりません。
+## 補償の失敗を検索属性に立てない
 
-もう一度書くと、条件は**鍵の粒度が業務操作の粒度と一致していること**、それだけです。既定の
-`RunID` は、何が入っているか分からない値を避けて、粒度を判定できるほうを選んだ結果です。
-一致していると言える立場にいるなら、`KeyFunc` でそう言うほうが強い鍵になります。
+`Options.CompensationFailedAttribute` がありました。巻き戻しが綺麗に終わらなかったとき、
+運用が検索できるように boolean の検索属性を立てるものです。
 
----
-
-## 4. エラーチェックを1つ忘れると、壊れた成功になる
-
-### やりたいこと
-
-ステップごとに `if err != nil` を書きたくない。失敗したら、以降は黙って飛ばしてほしい。
-
-### 素直に書くと
-
-エラーを溜めておいて、以降のステップを何もしないようにする作りが思いつきます。
+外したのは、`workflow.UpsertTypedSearchAttributes` が素の Temporal で、しかも
+**検出手段は既に公開してある**からです。`RunOrCompensate` が返すエラーの型を見れば済みます。
 
 ```go
-res, _ := step(s, "reserve", ...)   // エラーは捨てる
-chg, _ := step(s, "charge", ...)    // 前が失敗していたら、ここは何もしない
-shp, _ := step(s, "ship", ...)
+receipt, err := saga.RunOrCompensate(ctx, opts, body)
 
-return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
-```
-
-### そこで何が起きるか
-
-`charge` が失敗した場合を追います。
-
-```
-charge が失敗   →  エラーを記録し、ship は何もしない
-                 →  chg と shp は空文字のまま
-                 →  return Receipt{...}, nil     ← nil を返してしまった
-                 →  ワークフローは「成功」として記録される
-```
-
-在庫は押さえられたまま、返金は走らず、画面は緑。アラートも鳴りません。**取り消しが1回も
-実行されていないのに、誰も気づきません。**
-
-素の `if err != nil { return }` を書いていれば、書き忘れは次の行でコンパイラかレビューに
-引っかかります。**便利にした分、穴もライブラリ側で塞ぐ必要がありました。**
-
-### このライブラリだと
-
-`saga.Run` が、本体の戻り値を信用しません。
-
-```go
-// saga.Run の中でやっていること
-out, err := body(s)
-
-if err == nil {
-    err = s.err       // 本体が nil でも、ステップが失敗していれば拾う
-}
-if err == nil {
-    return out, nil   // 本当に成功したときだけ、戻り値を通す
-}
-
-var zero T
-return zero, s.compensate(ctx, err)   // 半端な戻り値は捨てる
-```
-
-（実際にはこの後に ContinueAsNew の分岐が入ります。あれはエラーの形で返りますが、
-saga が続いているだけなので取り消しません。）
-
-チェックを忘れても、ワークフローは失敗し、取り消しは走ります。
-
-### 最初の失敗が勝つ
-
-もう一段あります。**ステップの失敗は、body が後から返すエラーより強い**、という規則です。
-
-ステップが失敗すると、以降の `saga.Activity` は何もせず `AwaitSignal` は即座に返ります。すると
-body は「値が空」「signal が来ない」という**結果だけを見て、本当ではない結論**を出します。
-
-```
-reserve が失敗
-   ↓
-AwaitSignal が即座に返る（待つ意味が無いので正しい）
-   ↓
-body は「誰も承認しなかった」と判断してそのエラーを返す
-   ↓
-ワークフローは "nobody reviewed the order in time" で失敗   ← 嘘
-```
-
-本当の原因は予約の失敗で、それがどこにも残りません。なので `Run` は `s.err` を優先します。
-
-```go
-out, err := body(ctx, s)
-
-if s.err != nil {
-    err = s.err     // 最初の失敗が根本原因。body のエラーはその後始末
-}
-```
-
-握って自分のエラーを返したい場合は、先に `s.Clear()` を呼びます。`Clear` はそのために
-あります。
-
----
-
-## 5. forward と取り消しを逆に書いても、誰も教えてくれない
-
-### やりたいこと
-
-`saga.Step(..., saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ...)` の2つを、
-うっかり逆に書いた。気づきたい。
-
-### 素直に書くと
-
-SDK に合わせると、引数は `any` になります。
-
-```go
-func Step(s *Saga, name string, fwd, undo any, args ...any)
-```
-
-### そこで何が起きるか
-
-**コンパイルも通るし、実行時のスケジュール時点でも検証されません。** SDK の
-`ExecuteActivity` は関数値を名前の文字列に変換してから渡すので、引数の個数も型も照合され
-ないためです。
-
-アクセルとブレーキを逆に配線しても、走り出すまで分からないのと同じです。しかも走り出す
-のは、**取り消しフェーズ、つまり saga が既に失敗している最中**です。
-
-### このライブラリだと
-
-型付きの関数で受けます。
-
-```go
-func Step[In, Out any](ctx workflow.Context, s *Saga, name string,
-    fwd Forward[In, Out], undo *Undo[In], in In) (Out, error)
-
-func Activity[In, Out any](fwd func(context.Context, In) (Out, error)) Forward[In, Out]
-
-func UndoActivity[In any](undo func(context.Context, In) error) *Undo[In]
-```
-
-forward は値とエラーを返し、補償はエラーだけを返します。この非対称が効きます。逆に書くと
-戻り値の形が合わず、**コンパイルエラー**になります。しかも `Activity` と `UndoActivity` の
-両方で落ちるので、どちらを直せばいいかも分かります。
-
-```go
-saga.Step(ctx, s, "charge", saga.Activity(a.Refund), saga.UndoActivity(a.Charge), req)
-//                                        ~~~~~~~~                    ~~~~~~~~
-//                                        わざと逆に書いてみる
-```
-
-実際にコンパイラが出すのはこれです。
-
-```
-in call to saga.Activity, type func(ctx context.Context, req ChargeReq) error
-of a.Refund does not match inferred type func(context.Context, ChargeReq) (Out, error)
-for func(context.Context, In) (Out, error)
-
-in call to saga.UndoActivity, type func(ctx context.Context, req ChargeReq) (string, error)
-of a.Charge does not match inferred type func(context.Context, ChargeReq) error
-for func(context.Context, In) error
-```
-
-走らせる前に、エディタが赤線を引きます。
-
----
-
-## 6. 取り消しが失敗したとき、原因が消える
-
-### やりたいこと
-
-課金の取り消しに失敗した。元の失敗（配送が取れなかった）も、取り消しの失敗も、両方残したい。
-
-### 素直に書くと
-
-エラーを2つまとめる標準の方法があります。
-
-```go
-return errors.Join(originalErr, compensationErr)
-```
-
-### そこで何が起きるか
-
-Temporal の履歴に残る形に変換する段階で、**中身が落ちます**。変換器は具象型の型スイッチで、
-`Unwrap() error` を1本だけ辿る作りだからです。`errors.Join` が返す型はどれにも当たらず、
-既定の枝に落ちます。
-
-```
-errors.Join(...)  →  型名が "joinError" になる
-                  →  原因チェーンが消える
-                  →  RetryPolicy の NonRetryableErrorTypes も照合されなくなる
-```
-
-履歴に残るのは、改行で連結された文字列1個だけ。
-
-### このライブラリだと
-
-原因を1本鎖で持つエラーを作ります。
-
-```go
-temporal.NewApplicationErrorWithOptions(
-    "saga: compensation did not finish cleanly; failed: charge",
-    saga.CompensationFailedType,                 // 型名で照合できる
-    temporal.ApplicationErrorOptions{
-        Cause:        originalErr,               // 元の失敗はここに残る
-        NonRetryable: true,
-        Details:      []any{report},             // 失敗したステップ名
-    },
-)
-```
-
-呼び出し側はこう読めます。
-
-```go
 var appErr *temporal.ApplicationError
 if errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType {
-    var report saga.CompensationReport
-    appErr.Details(&report)
-    // report.Failed  → 取り消しに失敗したステップ
-    // report.Skipped → 時間切れで実行されなかったステップ
+    workflow.UpsertTypedSearchAttributes(ctx, CompensationFailedAttribute.ValueSet(true))
 }
 ```
 
-1つ失敗しても、残りの取り消しは続けます。返金の失敗を理由に、在庫の解放までやめる理由は
-ありません（`StopOnCompensationError` で変えられます）。
+外した結果、`Options` は **Java 版とちょうど同じ2つ**になりました。
 
----
+## 補償の予算を持たない
 
-## 7. ステップがアクティビティに縛られる
+`Options.CompensationBudget` を必須にしていた時期があります。外しました。
 
-### やりたいこと
+補償アクティビティは、ctx の `ScheduleToCloseTimeout` で**リトライ込みで**縛られます。
+N ステップなら全体は N × それで有界です。予算は**同じことを別の場所でもう一度言って
+いた**だけで、しかも必須だったので「忘れても守ってくれる」ものですらありませんでした。
 
-梱包の工程を子ワークフローで書きたい。履歴が長くなるので独立させたい。でも saga の
-ステップとして、他と同じように巻き戻したい。
+代わりに罠を名指ししています。切り離した context は外から止められず、Temporal の既定の
+リトライは無制限なので、**補償には `ScheduleToCloseTimeout` を必ず設定してください。**
 
-### 素直に書くと
+## signal を待つ関数を持たない
 
-`saga.Activity` が受け取るのは `func(context.Context, In) (Out, error)` です。これは
-**アクティビティ関数のシグネチャそのもの**なので、子ワークフローは渡せません。
+`saga.AwaitSignal` がありました。`NewSelector` + `AddReceive` + `AddFuture(NewTimer)` の
+素の SDK イディオムで、冪等キーも載せず予算も切らないので、このライブラリの基準に
+合いません。`example/workflow/approval/` の `awaitDecision` に移しました。
 
-```go
-// 子ワークフローは第1引数が workflow.Context なので、Activity には入らない
-saga.Step(ctx, s, "pack", saga.Activity(PackWorkflow), nil, req)   // コンパイルエラー
-```
+待つこと自体をステップにするのは今も正しい形です。**ステップなら、先のステップが失敗して
+いれば飛ばされます。** ロールバックに向かっている saga が人の承認を1時間待つことはあり
+ません。
 
-逃げ道は `s.Add` で手書きすることですが、そうすると冪等キーも予算の切り詰めも自分で
-やることになります。
+## ローカルアクティビティは対象外
 
-### そこで何が起きるか
+リトライがワークフロータスク内で完結してサーバに残らないので、**取り消しが要るような
+副作用を置く場所ではありません**。`LocalActivityOptions` に ID フィールドが無いのも
+（[sdk-notes.md](sdk-notes.md)）、同じ方向の話です。
 
-「forward と補償を対で登録する」という中核は、**executor に依存していません**。
-補償を先に積む、同じ鍵を両側に渡す、逆順で回す、予算で切る。どれもアクティビティである
-必要はない。縛っていたのは引数の型だけでした。
-
-SDK を確認すると、executor ごとに違うのは3点だけです。
-
-| 名前 | 実行 | 鍵を載せる場所 | 予算で切る対象 |
-| --- | --- | --- | --- |
-| `saga.Activity` | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
-| `saga.ChildWorkflow` | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
-| `saga.Func` | **その場で呼ぶ** | 遠隔実行が無いので不要 | 切るものが無い |
-
-名前は「何を実行するか」で揃えています。`Step` は1つだけで、何で実行するかは渡す値が
-決めます。`Step` という名前がアクティビティ専用だと、名前からそれが読めません。
-
-外部ワークフローへの signal に専用の値を用意していないのもこの表のためです。
-`SignalExternalWorkflow` には options 構造体が無いので、鍵を載せる場所も切る予算も
-ありません。鍵も予算も扱わない executor は `saga.Func` に語彙を足しただけになります。
-
-### このライブラリだと
-
-中核は `Step` のまま、上の3点だけを閉じ込めたクロージャを作る値として
-`saga.ChildWorkflow` と `saga.Func`、および対応する `saga.Undo*` を用意しています。
-
-```go
-pack, _ := saga.Step(ctx, s, "pack",
-    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
-
-saga.Step(ctx, s, "hold",
-    saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{SKU: in.SKU})
-```
-
-形は `saga.Activity` と同じ。forward が値とエラーを返し補償がエラーだけを返す非対称も
-同じなので、取り違えはやはりコンパイルエラーになります。**渡す関数の第1引数の型が
-executor を選ぶ**ので、どちらを呼ぶかは型が教えてくれます。
-
-forward と補償は別々の値なので、**片方だけ別の executor にできます**。上の `pack` が
-それで、荷造りは子ワークフロー、荷ほどきはアクティビティ1回です。鍵は両側で同じなので、
-子は `IdempotencyKeyOf`、アクティビティは `IdempotencyKey` で同じ値を読みます。
-
-混在した saga は1つの逆順で巻き戻ります。補償のレジストリは元から
-`func(workflow.Context) error` を持っているだけで、executor を区別していないからです。
-
-### 待つ処理を本体から追い出す
-
-4つ目の「ワークフロー本体」は、アクティビティだけが持っていた特権を他にも配るための
-ものです。
-
-アクティビティは「失敗が何を意味するか」を関数の中に閉じ込められます。`a.Charge` が
-`error` を返せば、それがステップの失敗になり、本体には何も漏れません。ところが signal を
-待つ処理は本体に書くしかなく、分岐が漏れていました。
-
-```go
-// 漏れている形
-decision, ok := saga.AwaitSignal[Decision](ctx, "approval", wait)
-if !ok {
-    return Receipt{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
-}
-if !decision.Approved {
-    return Receipt{}, temporal.NewApplicationError("rejected", DeniedType, nil)
-}
-```
-
-`saga.Func` は、利用者が書いた**ワークフローコードをその場で呼んでステップにします**。
-判断はその関数の中で完結し、本体はステップの列のままになります。
-
-```go
-saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
-
-// 利用者が書く。アクティビティを書くのと同じ立ち位置
-func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
-    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
-    if !ok {
-        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
-    }
-    ...
-}
-```
-
-ステップになったので、**先のステップが失敗していれば飛ばされる**のも他と同じです。
-`AwaitSignal` が `*Saga` を取って自分でスキップ判定をしていた特別扱いは、これで消えました。
-
-### どれが専用の関数に値するか
-
-4つのうち `saga.Func` は他の3つを**全部書けてしまいます**。渡す関数の中で
-`ExecuteActivity` を呼べばアクティビティのステップになるし、`SignalExternalWorkflow` を
-呼べば signal のステップになる。
-
-では何が専用の関数を正当化するのか。**冪等キーを載せるか、予算で切るか**です。
-
-| | 鍵 | 予算 | 専用の値に値するか |
-| --- | --- | --- | --- |
-| `saga.Activity` | ✓ | ✓ | する |
-| `saga.ChildWorkflow` | ✓ | ✓ | する |
-| 外部への signal | ✗ | ✗ | **しない**。`saga.Func` で書く |
-| `saga.Func` | — | — | 他が扱えないものの受け皿 |
-
-signal を送るステップは、以前は専用の値にしていました。この基準に照らすと
-`saga.Func` に語彙を足しただけだったので、落としました。
-
-### Temporal の他のオブジェクトはどうか
-
-副作用を持つワークフロー API を一通り当たった結果です。
-
-| | 鍵 | 予算 | 判断 |
-| --- | --- | --- | --- |
-| Nexus operation（`NexusClient.ExecuteOperation`） | ✗ | ✓ `ScheduleToCloseTimeout` | **一番近い候補**。予算は切れるが鍵が載らない |
-| `RequestCancelExternalWorkflow` | ✗ | ✗ | `saga.Func` で足りる。そもそも取り消しを取り消せない |
-| `UpsertTypedSearchAttributes` / `UpsertMemo` | 不要 | 無い | `saga.Func` で足りる。自分の可視化情報なので遠隔実行が無い |
-| `SideEffect` / `MutableSideEffect` | — | — | 値を作るだけで外に副作用が無い |
-| ローカルアクティビティ | ✗ | ✓ | 鍵が載らない。リトライがサーバに残らないので置き場所としても不適 |
-
-**Nexus だけは将来 `NexusStep` に値するかもしれません。** 他サービスへの呼び出しで、
-タイムアウトを持ち、補償が要る副作用を起こしうるからです。ただし
-`NexusOperationOptions` に ID フィールドが無いので、今の基準では `saga.Func` と同じ段に
-なります。必要になってから足します。
-
-### signal のステップが一番弱い理由
-
-`saga.Func` は成立しますが、`SignalExternalWorkflow` には options 構造体が無いので
-**冪等キーを載せる場所がありません**。対になっていることは保証できても、受け手が同じ
-signal を2回受けたときに壊れないようにするのは受け手の責任です。形が `saga.Activity` と違うのも
-そのためで、signal は関数呼び出しではないので `fwd`/`undo` に関数ではなく宛先
-（`Signal`）を取ります。
-
-### ローカルアクティビティを外した理由
-
-`LocalActivityOptions` には ID フィールドがありません。冪等キーを載せる場所が無いので、
-このライブラリの契約を満たせない。加えてローカルアクティビティはリトライがワークフロー
-タスク内で完結してサーバに残らないので、取り消しが必要な副作用を置く場所としても適して
-いません。
+`do` はただの関数なので、書こうと思えば書けます。止めてはいません。
 
 ---
 
 ## まとめ
 
-| 素直に書くと | 起きること | このライブラリ |
+| 場面 | 素直に書くと | このライブラリだと |
 | --- | --- | --- |
-| 取り消しを `ctx` で実行 | キャンセル時に全部失敗する | 切り離した context で実行し、制限時間を必須に |
-| 成功してから取り消しを積む | タイムアウトした副作用が残る | 実行する前に積む |
-| forward の戻り値を取り消しに渡す | 積む時点でまだ存在しない | 先に整理券を配り、両方に渡す |
-| エラーを溜めて後で見る | 見忘れると壊れた成功になる | `Run` が本体の戻り値を信用しない |
-| `any` で関数を受ける | 取り違えが取り消し中に発覚 | 型で受けてコンパイルエラーに |
-| `errors.Join` で束ねる | 履歴から原因が消える | 1本鎖の `ApplicationError` |
-| ステップをアクティビティに限る | 子ワークフローや外部への signal が巻き戻しに乗らない | `saga.ChildWorkflow` と `saga.Func` |
+| キャンセルされた | 補償が1本も動かない | 切り離した context で動く |
+| forward がタイムアウトした | 補償が登録されていない | 実行前に登録済み |
+| エラーチェックを忘れた | 壊れた成功になる | ステップの失敗が勝つ |
+| 補償が失敗した | 原因が履歴から消える | 原因1本 + どのステップかを details に |
+| 補償が forward の出力を要る | 渡せない | 同じ構造体のフィールドを読む |
+| 補償が途中で失敗した | 自分で決める | `ContinueWithError` |
 
-塞げていない穴は [activity-contract.md](activity-contract.md) に書いてあります。
+**手放したもの**: `ExecuteActivity` のラップ、forward と補償の取り違えの検出、冪等キーの
+導出と受け渡し、アクティビティの命名、補償の予算、signal を待つ関数。
+
+どれも「Temporal に表現手段があるものは奪わない」という1つの基準で外しました。例外は
+取り違えの検出で、これは基準と引き換えに失った**後退**です。

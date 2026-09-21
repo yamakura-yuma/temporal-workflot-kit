@@ -2,9 +2,8 @@
 // are written in.
 //
 // The suite runs one Temporal dev server and one worker per example for the
-// whole run, started in TestMain. Scenarios are kept apart by using their own
-// order id, and by the fact that saga idempotency keys are scoped to a workflow
-// run.
+// whole run, started in TestMain. Scenarios are kept apart by giving each one
+// its own order id, and by each example having a task queue of its own.
 //
 // Everything here is _test.go. Nobody imports this package; it exists to be run.
 package specsteps
@@ -24,12 +23,13 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/approval"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/external"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/approval"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/childflow"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/external"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/pipeline"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/state"
 )
 
 // uiPort is the dev server's Web UI, published by the spec-ui recipe. It is
@@ -45,16 +45,16 @@ const holdEnv = "SPEC_HOLD"
 // specsDir is where the .feature files live, relative to this package.
 const specsDir = "../docs/specs"
 
-// suite is what the whole run shares. The workers hold these ledger instances
-// for their lifetime, so the ledgers cannot be per-scenario; handing them to
-// each scenario through its context is what keeps them out of package-level
-// variables.
+// suite is what the whole run shares. Every worker registers the same
+// activities -- there is only one set of them -- and holds them for its
+// lifetime, so they cannot be per-scenario. Handing them to each scenario
+// through its context is what keeps them out of package-level variables.
+//
+// Sharing them across examples is safe because the activities hold no state:
+// they check a failure flag in their input and return an id built from it.
 type suite struct {
-	client    client.Client
-	order     *order.Ledger
-	pipeline  *pipeline.Ledger
-	childflow *childflow.Ledger
-	state     *state.Ledger
+	client client.Client
+	acts   *activity.Activities
 }
 
 // suiteRun is the one piece of package-level state left: what TestMain has to
@@ -112,7 +112,7 @@ func TestFeatures(t *testing.T) {
 			Strict:   true,
 			TestingT: t,
 			// Concurrency stays at the default 1. The scenarios share one set of
-			// ledgers and one dev server, so they cannot run in parallel.
+			// activity instances and one dev server, so they cannot run in parallel.
 		},
 	}
 
@@ -121,8 +121,8 @@ func TestFeatures(t *testing.T) {
 	}
 }
 
-// initializeScenario registers every step and gives each scenario a store of
-// its own. The store is a pointer, so steps mutate it without handing a new
+// initializeScenario registers every step and gives each scenario a state of
+// its own. That state is a pointer, so steps mutate it without handing a new
 // context back.
 func initializeScenario(s *suite) func(*godog.ScenarioContext) {
 	return func(sc *godog.ScenarioContext) {
@@ -177,16 +177,9 @@ func startSuite() (*suiteRun, error) {
 	}
 
 	r.suite = &suite{
-		client:    r.devServer.Client(),
-		order:     order.NewLedger(),
-		pipeline:  pipeline.NewLedger(),
-		childflow: childflow.NewLedger(),
-		state:     state.NewLedger(),
+		client: r.devServer.Client(),
+		acts:   activity.NewActivities(),
 	}
-
-	// The order example's activities are shared with the approval example, so
-	// both write to the same ledger.
-	orderActivities := order.NewActivities(r.suite.order)
 
 	start := func(name string, register func(w worker.Worker)) error {
 		w := worker.New(r.suite.client, name, worker.Options{})
@@ -200,7 +193,7 @@ func startSuite() (*suiteRun, error) {
 
 	if err := start(order.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(order.OrderWorkflow)
-		w.RegisterActivity(orderActivities)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -209,14 +202,14 @@ func startSuite() (*suiteRun, error) {
 	// worker.
 	if err := start(approval.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(approval.ApprovalWorkflow)
-		w.RegisterActivity(orderActivities)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
 
 	if err := start(pipeline.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(pipeline.PipelineWorkflow)
-		w.RegisterActivity(pipeline.NewActivities(r.suite.pipeline))
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -226,14 +219,18 @@ func startSuite() (*suiteRun, error) {
 	if err := start(childflow.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(childflow.ChildflowWorkflow)
 		w.RegisterWorkflow(childflow.PackWorkflow)
-		w.RegisterActivity(childflow.NewActivities(r.suite.childflow))
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
 
+	// The state example is written twice, and both shapes run here: the
+	// specification starts them over the same order and compares the receipts,
+	// which is the only thing keeping the flat one from rotting.
 	if err := start(state.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(state.StateWorkflow)
-		w.RegisterActivity(state.NewActivities(r.suite.state))
+		w.RegisterWorkflow(state.FlatWorkflow)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -241,7 +238,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(external.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(external.ExternalWorkflow)
 		w.RegisterWorkflow(external.InventoryWorkflow)
-		w.RegisterActivity(external.NewActivities(external.NewLedger()))
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}

@@ -6,9 +6,12 @@
 
   予約 ID を課金の入力に、課金 ID を配送の入力に渡す saga。
 
-  見たいのは補償の側。補償はステップの実行より前に登録されるので、そのステップ自身の出力を
-  見ることはできない。代わりに**forward と同じ入力**を受け取るので、前段の出力はそこに入って
-  いる。だから「どの予約に対する課金を返すのか」が補償に分かる。
+  見たいのは補償の側。補償は**登録はステップの実行より前、実行は後**なので、走る時点では
+  forward が書いたフィールドが埋まっている。だから「どの予約に対する課金を、どの課金として
+  返すのか」が補償に分かる。ワークフローが持ち回る必要はない。
+
+  forward が返さなかったとき（下流に書けた直後のタイムアウト）だけはフィールドが空になる。
+  そこは冪等キーで引く領域で、`docs/interface.md` の C2・C3 にある。
 
   シナリオ: 前段の ID が、次段の補償にも渡っている
 
@@ -16,12 +19,12 @@
 
     前提 連鎖する注文 "chain" を "ship" で失敗させる
     ならば saga は "no carrier available" で失敗する
-    かつ ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-    かつ 補償 "charge" が受け取った前段の ID は "res-chain"
-    かつ 補償 "ship" が受け取った前段の ID は "chg-res-chain"
-    かつ 注文は "reserve, charge, ship" を保持していない
+    かつ アクティビティ "Reserve, Charge, Ship, CancelShipment, Refund, Unreserve" が実行された
+    かつ 補償 "Refund" が受け取った前段の ID は "res-chain"
+    かつ 補償 "CancelShipment" が受け取った前段の ID は "chg-chain"
+    かつ 注文は "Reserve, Charge, Ship" を保持していない
 
   シナリオ: 正常系では最後まで連鎖する
     前提 連鎖する注文 "ok"
     ならば saga は成功する
-    かつ ステップ "reserve, charge, ship" が実行された
+    かつ アクティビティ "Reserve, Charge, Ship" が実行された

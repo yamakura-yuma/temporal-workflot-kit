@@ -12,14 +12,19 @@
   インメモリのテスト環境はキャンセルされた context でもアクティビティを
   実行してしまい、ここで確かめたい振る舞いを示せないため。
 
-  「ステップ ... が実行された」はワークフロー履歴を読む。つまり運用が UI で見る順序
-  そのものを指す。"charge:undo" は "charge" の補償を表す。この読み方は6本に共通する。
+  「アクティビティ ... が実行された」はワークフロー履歴を読む。つまり運用が UI で見る
+  順序そのものを指す。名前は**実際に走った関数の名前**（`Charge`、その補償は `Refund`）。
+  saga ライブラリはアクティビティに名前を付けないので、履歴に残るのはこれ。この読み方は
+  6本に共通する。
+
+  一方「補償に失敗したステップは ...」だけは**ステップ名**（`charge`）を使う。これは
+  `s.Step` に渡した名前で、`CompensationReport` が報告するもの。履歴の名前とは別物。
 
   シナリオ: 成功した saga は何も取り消さない
     前提 注文 "happy"
     ならば saga は成功する
-    かつ ステップ "reserve, charge, ship" が実行された
-    かつ 注文は "reserve, charge, ship" を保持したままである
+    かつ アクティビティ "Reserve, Charge, Ship" が実行された
+    かつ 注文は "Reserve, Charge, Ship" を保持したままである
 
   シナリオ: 失敗すると、失敗したステップを含めて逆順に取り消される
 
@@ -29,8 +34,8 @@
 
     前提 "ship" で失敗する注文 "rollback"
     ならば saga は "no carrier available" で失敗する
-    かつ ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-    かつ 注文は "reserve, charge, ship" を保持していない
+    かつ アクティビティ "Reserve, Charge, Ship, CancelShipment, Refund, Unreserve" が実行された
+    かつ 注文は "Reserve, Charge, Ship" を保持していない
 
   シナリオ: キャンセルされた saga もロールバックされる
 
@@ -39,10 +44,10 @@
     workflow.NewDisconnectedContext から得た context を渡しているからに他ならない。
 
     前提 課金の後で待機する注文 "cancelme"
-    もし "charge" が実行されたら saga をキャンセルする
+    もし "Charge" が実行されたら saga をキャンセルする
     ならば saga は失敗する
-    かつ ステップ "reserve, charge, charge:undo, reserve:undo" が実行された
-    かつ 注文は "reserve, charge" を保持していない
+    かつ アクティビティ "Reserve, Charge, Refund, Unreserve" が実行された
+    かつ 注文は "Reserve, Charge" を保持していない
 
   シナリオ: 失敗した補償は報告され、残りの補償を止めない
 
@@ -54,6 +59,6 @@
     ならば saga は "CompensationFailed" で失敗する
     かつ 補償に失敗したステップは "charge"
     かつ saga は運用者向けにフラグが立つ
-    かつ ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-    かつ 注文は "charge" を保持したままである
-    かつ 注文は "reserve, ship" を保持していない
+    かつ アクティビティ "Reserve, Charge, Ship, CancelShipment, Refund, Unreserve" が実行された
+    かつ 注文は "Charge" を保持したままである
+    かつ 注文は "Reserve, Ship" を保持していない

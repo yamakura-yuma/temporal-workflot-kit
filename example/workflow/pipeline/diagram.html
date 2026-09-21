@@ -77,7 +77,7 @@
 
 <nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="diagram.html" class="here">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>pipeline — 前段の出力が次段の入力になる<span class="path">example/pipeline/</span></h1>
+<h1>pipeline — 前段の出力が次段の入力になる<span class="path">example/workflow/pipeline/</span></h1>
 <p>予約 ID を課金の入力に、課金 ID を配送の入力に渡します。見どころは<strong>補償の側</strong>です。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
@@ -109,19 +109,20 @@
 </div>
 
 <div class="note-box">
-  <strong>補償は、そのステップ自身の出力を見られません。</strong> 登録されるのが実行より
-  前だからです。代わりに forward と同じ入力を受け取るので、<em>前段まで</em>の出力は
-  手元にあります。自分のステップの出力が要る場合は、冪等キーで引いてください。
+  <strong>補償は、登録は実行より前、実行は後です。</strong> だから走る時点では forward が
+  書いたフィールドが埋まっていて、<em>自分のステップの出力も</em>読めます。持ち回る必要は
+  ありません。forward が返さなかったときだけ空になり、そこは冪等キーで引く領域です。
 </div>
 
-<pre><code>chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
-    ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
+<pre><code>func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Charge,
+        activity.ChargeReq{Order: w.in, Reservation: w.reservation}).Get(ctx, &amp;w.charge)
+}                                        //  ↑ 前段の出力        ↑ 自分の出力を書く
 
-// Refund は同じ ChargeReq を受け取るので、req.Reservation が使える
-func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
-    a.ledger.record("charge", req.Reservation)
-    ...
-}</code></pre>
+func (w *fulfillment) refund(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Refund,
+        activity.ChargeReq{Order: w.in, Reservation: w.reservation, Charge: w.charge}).Get(ctx, nil)
+}                                        //  ↑ 前段         ↑ forward が書いたもの</code></pre>
 
 <div class="spec"><b>## 前段の ID が、次段の補償にも渡っている</b>
 
@@ -132,9 +133,9 @@ func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 * 補償 "ship" が受け取った前段の ID は "chg-res-chain"</div>
 
 <footer>
-  ソース: <code>example/pipeline/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/pipeline/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>

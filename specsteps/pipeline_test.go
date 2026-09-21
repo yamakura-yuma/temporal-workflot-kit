@@ -9,17 +9,18 @@ import (
 	"github.com/cucumber/godog"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/pipeline"
 )
 
 func registerPipelineSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^連鎖する注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).startPipeline(pipeline.Order{ID: id, SKU: "widget", Amount: 4200})
+		return stateOf(ctx).startPipeline(sampleLine(id, ""))
 	})
 
 	sc.Step(`^連鎖する注文 "([^"]*)" を "([^"]*)" で失敗させる$`,
 		func(ctx context.Context, id, step string) error {
-			return stateOf(ctx).startPipeline(pipeline.Order{ID: id, SKU: "widget", Amount: 4200, FailAt: step})
+			return stateOf(ctx).startPipeline(sampleLine(id, step))
 		})
 
 	sc.Step(`^補償 "([^"]*)" が受け取った前段の ID は "([^"]*)"$`,
@@ -28,14 +29,22 @@ func registerPipelineSteps(sc *godog.ScenarioContext) {
 			if _, err := s.outcome(); err != nil {
 				return err
 			}
-			if got := s.pipeline.Upstream(step); got != upstream {
+			h, err := s.history()
+			if err != nil {
+				return err
+			}
+			got, err := h.upstream(step)
+			if err != nil {
+				return err
+			}
+			if got != upstream {
 				return fmt.Errorf("補償 %q が受け取った前段の ID: got %q, want %q", step, got, upstream)
 			}
 			return nil
 		})
 }
 
-func (s *scenarioState) startPipeline(in pipeline.Order) error {
+func (s *scenarioState) startPipeline(in activity.Order) error {
 	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "pipeline-" + in.ID, TaskQueue: pipeline.TaskQueue},
 		pipeline.PipelineWorkflow, in)

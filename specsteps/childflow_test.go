@@ -11,18 +11,20 @@ import (
 	"github.com/cucumber/godog"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/childflow"
 )
 
 func registerChildflowSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^子ワークフローを含む注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).startChildflow(childflow.Order{ID: id, SKU: "widget"})
+		return stateOf(ctx).startChildflow(sampleLine(id, ""))
 	})
 
 	sc.Step(`^子ワークフローを含む注文 "([^"]*)" を "([^"]*)" で失敗させる$`,
 		func(ctx context.Context, id, step string) error {
-			return stateOf(ctx).startChildflow(childflow.Order{ID: id, SKU: "widget", FailAt: step})
+			return stateOf(ctx).startChildflow(sampleLine(id, step))
 		})
 
 	// The child workflows appear in the parent's history as
@@ -71,20 +73,64 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 
-		pack := s.childflow.KeySeenBy("pack")
-		unpack := s.childflow.KeySeenBy("unpack")
-
-		if pack == "" {
-			return errors.New("梱包の子が冪等キーを読めていません")
+		run, err := s.currentRun()
+		if err != nil {
+			return err
 		}
-		if pack != unpack {
-			return fmt.Errorf("冪等キーが一致しません: pack=%q unpack=%q", pack, unpack)
+
+		// The key the compensation was handed, out of the parent's history.
+		parent, err := s.history()
+		if err != nil {
+			return err
+		}
+		undone, err := packKeyIn(parent, "Unpack")
+		if err != nil {
+			return fmt.Errorf("取り消し側: %w", err)
+		}
+
+		// The key the packing child handed its activity, out of the child's own
+		// history. The child runs the activity, so only the child's history
+		// records what it passed down.
+		child, err := s.historyOf(run.GetRunID()+"/pack", "", "")
+		if err != nil {
+			return fmt.Errorf("梱包の子の履歴を読めません: %w", err)
+		}
+		if len(child.scheduled) == 0 {
+			return errors.New("梱包の子はアクティビティを実行していません")
+		}
+		packed, err := packKeyIn(child, child.scheduled[0])
+		if err != nil {
+			return fmt.Errorf("梱包側: %w", err)
+		}
+
+		if packed == "" {
+			return errors.New("梱包の子が冪等キーを渡していません")
+		}
+		if packed != undone {
+			return fmt.Errorf("冪等キーが一致しません: pack=%q unpack=%q", packed, undone)
 		}
 		return nil
 	})
 }
 
-func (s *scenarioState) startChildflow(in childflow.Order) error {
+// packKeyIn decodes the idempotency key out of the PackReq an activity was
+// handed.
+func packKeyIn(h *sagaHistory, name string) (string, error) {
+	payloads, ok := h.input[name]
+	if !ok {
+		return "", fmt.Errorf("アクティビティ %q は実行されていません", name)
+	}
+
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := converter.GetDefaultDataConverter().FromPayloads(payloads, &req); err != nil {
+		return "", fmt.Errorf("入力を読めません: %w", err)
+	}
+	return req.Key, nil
+}
+
+func (s *scenarioState) startChildflow(in activity.Order) error {
 	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "childflow-" + in.ID, TaskQueue: childflow.TaskQueue},
 		childflow.ChildflowWorkflow, in)

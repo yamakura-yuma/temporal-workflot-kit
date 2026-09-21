@@ -4,7 +4,7 @@ package specsteps
 //
 // The only link is the step sentence. godog takes a line like
 //
-//	もし "charge" が実行されたら saga をキャンセルする
+//	もし "Charge" が実行されたら saga をキャンセルする
 //
 // strips the Gherkin keyword, and looks for the step registered with a regular
 // expression that matches the rest:
@@ -37,12 +37,14 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/order"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
@@ -56,6 +58,7 @@ type scenarioState struct {
 	*suite
 
 	run       client.WorkflowRun // the saga under test
+	flat      client.WorkflowRun // the state example's second shape, when a scenario runs both
 	inventory client.WorkflowRun // the external example's long-lived workflow
 	result    error              // the saga's outcome, once awaited
 	awaited   bool
@@ -93,58 +96,151 @@ func (s *scenarioState) outcome() (sagaErr error, err error) {
 	return s.result, nil
 }
 
-// scheduledSteps returns the saga's steps as activities were scheduled, in the
-// order the workflow history records them. A compensation appears as
-// "<step>:undo".
-func (s *scenarioState) scheduledSteps() ([]string, error) {
+// sagaHistory is what the specifications ask the workflow history: which
+// activities the saga scheduled, which of them completed, and what each was
+// handed. It is read rather than the activities' own memory on purpose -- this
+// is Temporal's record of what actually happened, and an activity cannot
+// flatter itself in it.
+type sagaHistory struct {
+	// scheduled is the activities in the order they were scheduled, by the name
+	// of the function that ran -- "Reserve", "Unreserve" and so on. The saga
+	// library does not name activities, so this is what Temporal records.
+	scheduled []string
+	// completed reports, per activity, that it finished without an error.
+	completed map[string]bool
+	// input is what each activity was handed.
+	input map[string]*commonpb.Payloads
+	// children is the ids of the child workflows the saga started, scoped to
+	// the run like the step names are.
+	children []string
+}
+
+// undoOf pairs an activity with the one that undoes it. The examples all call
+// the same activity package, so one table covers every specification.
+var undoOf = map[string]string{
+	"Reserve": "Unreserve",
+	"Charge":  "Refund",
+	"Ship":    "CancelShipment",
+	"Pack":    "Unpack",
+}
+
+// history walks the saga's history once and pulls out all of it.
+func (s *scenarioState) history() (*sagaHistory, error) {
 	run, err := s.currentRun()
 	if err != nil {
 		return nil, err
 	}
-	prefix := run.GetRunID() + "/"
+	return s.historyOf(run.GetID(), run.GetRunID(), run.GetRunID()+"/")
+}
 
-	iter := s.client.GetWorkflowHistory(context.Background(), run.GetID(), run.GetRunID(),
+// historyOf is history for any workflow, which the childflow specification
+// needs: the packing activity runs inside the child, so it is the child's
+// history that says what the child handed it.
+func (s *scenarioState) historyOf(workflowID, runID, prefix string) (*sagaHistory, error) {
+	h := &sagaHistory{
+		completed: map[string]bool{},
+		input:     map[string]*commonpb.Payloads{},
+	}
+
+	iter := s.client.GetWorkflowHistory(context.Background(), workflowID, runID,
 		false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
 
-	var steps []string
+	// An ActivityTaskCompleted event names its activity by the id of the event
+	// that scheduled it, so the scheduled events have to be indexed first.
+	byEventID := map[int64]string{}
+
 	for iter.HasNext() {
 		event, err := iter.Next()
 		if err != nil {
 			return nil, fmt.Errorf("could not read the history: %w", err)
 		}
-		if event.GetEventType() != enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED {
-			continue
+
+		switch event.GetEventType() {
+		case enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
+			attr := event.GetActivityTaskScheduledEventAttributes()
+			name := attr.GetActivityType().GetName()
+
+			h.scheduled = append(h.scheduled, name)
+			h.input[name] = attr.GetInput()
+			byEventID[event.GetEventId()] = name
+
+		case enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
+			step, ok := byEventID[event.GetActivityTaskCompletedEventAttributes().GetScheduledEventId()]
+			if ok {
+				h.completed[step] = true
+			}
+
+		case enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED:
+			id := event.GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowId()
+			if !strings.HasPrefix(id, prefix) {
+				return nil, fmt.Errorf("child workflow id %q is not scoped to the run", id)
+			}
+			h.children = append(h.children, strings.TrimPrefix(id, prefix))
 		}
-		id := event.GetActivityTaskScheduledEventAttributes().GetActivityId()
-		if !strings.HasPrefix(id, prefix) {
-			return nil, fmt.Errorf("activity id %q is not scoped to the run", id)
-		}
-		steps = append(steps, strings.TrimPrefix(id, prefix))
 	}
-	return steps, nil
+	return h, nil
+}
+
+// standing reports whether the work an activity did is still done: it completed
+// and the activity that undoes it did not.
+func (h *sagaHistory) standing(name string) bool {
+	return h.completed[name] && !h.completed[undoOf[name]]
+}
+
+// upstream decodes the upstream id a compensation was handed. It gets the same
+// input its forward half got, so the id is in the payload the history recorded.
+func (h *sagaHistory) upstream(name string) (string, error) {
+	payloads, ok := h.input[name]
+	if !ok {
+		return "", fmt.Errorf("補償 %q は実行されていません", name)
+	}
+
+	// Enough of ChargeReq and ShipReq to read either.
+	var req struct {
+		Reservation string `json:"reservation"`
+		Charge      string `json:"charge"`
+	}
+	if err := converter.GetDefaultDataConverter().FromPayloads(payloads, &req); err != nil {
+		return "", fmt.Errorf("補償 %q の入力を読めません: %w", name, err)
+	}
+
+	switch name {
+	case "Refund":
+		return req.Reservation, nil
+	case "CancelShipment":
+		return req.Charge, nil
+	default:
+		return "", fmt.Errorf("補償 %q に前段の ID はありません", name)
+	}
+}
+
+// sampleLine is the order every specification starts from: one widget, one
+// price, and a step to fail at when the scenario wants one. The examples that
+// need more of their own build it into their own input type.
+func sampleLine(id, failAt string) activity.Order {
+	return activity.Order{ID: id, SKU: "widget", Quantity: 2, Amount: 4200, FailAt: failAt}
 }
 
 func registerRollbackSteps(sc *godog.ScenarioContext) {
 	// --- starting a saga -----------------------------------------------------
 
 	sc.Step(`^注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).start(order.Order{ID: id, SKU: "widget", Amount: 4200})
+		return stateOf(ctx).start(order.Request{Order: sampleLine(id, "")})
 	})
 
 	sc.Step(`^"([^"]*)" で失敗する注文 "([^"]*)"$`, func(ctx context.Context, step, id string) error {
-		return stateOf(ctx).start(order.Order{ID: id, SKU: "widget", Amount: 4200, FailAt: step})
+		return stateOf(ctx).start(order.Request{Order: sampleLine(id, step)})
 	})
 
 	sc.Step(`^課金の後で待機する注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).start(order.Order{ID: id, SKU: "widget", Amount: 4200, HoldSeconds: 120})
+		return stateOf(ctx).start(order.Request{Order: sampleLine(id, ""), HoldSeconds: 120})
 	})
 
 	sc.Step(`^"([^"]*)" で失敗し、"([^"]*)" を取り消せない注文 "([^"]*)"$`,
 		func(ctx context.Context, step, undoStep, id string) error {
-			return stateOf(ctx).start(order.Order{
-				ID: id, SKU: "widget", Amount: 4200,
-				FailAt: step, FailUndo: undoStep, MarkAttribute: true,
-			})
+			in := order.Request{Order: sampleLine(id, step), MarkAttribute: true}
+			in.Order.FailUndo = undoStep
+			return stateOf(ctx).start(in)
 		})
 
 	// --- driving a saga ------------------------------------------------------
@@ -157,11 +253,18 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 		}
 
 		deadline := time.Now().Add(30 * time.Second)
-		for !s.order.Held(run.GetRunID(), step) {
+		for {
+			h, err := s.history()
+			if err != nil {
+				return err
+			}
+			if h.completed[step] {
+				break
+			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf("%q never ran, so there is nothing to cancel", step)
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		if err := s.client.CancelWorkflow(context.Background(), run.GetID(), run.GetRunID()); err != nil {
@@ -258,32 +361,35 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	// --- what the history and the ledger say ---------------------------------
+	// --- what the history says -----------------------------------------------
 
-	sc.Step(`^ステップ "([^"]*)" が実行された$`, func(ctx context.Context, steps string) error {
+	sc.Step(`^アクティビティ "([^"]*)" が実行された$`, func(ctx context.Context, steps string) error {
 		s := stateOf(ctx)
 		if _, err := s.outcome(); err != nil {
 			return err
 		}
 
-		scheduled, err := s.scheduledSteps()
+		h, err := s.history()
 		if err != nil {
 			return err
 		}
-		if got, want := strings.Join(scheduled, ", "), steps; got != want {
-			return fmt.Errorf("steps in the history:\n  got:  %s\n  want: %s", got, want)
+		if got, want := strings.Join(h.scheduled, ", "), steps; got != want {
+			return fmt.Errorf("activities in the history:\n  got:  %s\n  want: %s", got, want)
 		}
 		return nil
 	})
 
 	sc.Step(`^注文は "([^"]*)" を保持したままである$`, func(ctx context.Context, steps string) error {
 		s := stateOf(ctx)
-		run, err := s.currentRun()
+		if _, err := s.outcome(); err != nil {
+			return err
+		}
+		h, err := s.history()
 		if err != nil {
 			return err
 		}
 		for _, step := range split(steps) {
-			if !s.order.Held(run.GetRunID(), step) {
+			if !h.standing(step) {
 				return fmt.Errorf("%q should still be held, but it is not", step)
 			}
 		}
@@ -292,13 +398,15 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 
 	sc.Step(`^注文は "([^"]*)" を保持していない$`, func(ctx context.Context, steps string) error {
 		s := stateOf(ctx)
-		run, err := s.currentRun()
+		if _, err := s.outcome(); err != nil {
+			return err
+		}
+		h, err := s.history()
 		if err != nil {
 			return err
 		}
 		for _, step := range split(steps) {
-			if s.order.Held(run.GetRunID(), step) || s.pipeline.Held(run.GetRunID(), step) ||
-				s.childflow.Held(run.GetRunID(), step) || s.state.Held(run.GetRunID(), step) {
+			if h.standing(step) {
 				return fmt.Errorf("%q is still held, so it was not rolled back", step)
 			}
 		}
@@ -306,9 +414,9 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 	})
 }
 
-func (s *scenarioState) start(in order.Order) error {
+func (s *scenarioState) start(in order.Request) error {
 	run, err := s.client.ExecuteWorkflow(context.Background(),
-		client.StartWorkflowOptions{ID: "saga-" + in.ID, TaskQueue: order.TaskQueue},
+		client.StartWorkflowOptions{ID: "saga-" + in.Order.ID, TaskQueue: order.TaskQueue},
 		order.OrderWorkflow, in)
 	if err != nil {
 		return fmt.Errorf("could not start the saga: %w", err)

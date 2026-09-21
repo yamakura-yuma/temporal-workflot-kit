@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>state — Run の中を短く保つ — temporal-workflow-kit example</title>
+<title>state — saga の本体を短く保つ — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -77,7 +77,7 @@
 
 <nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="diagram.html" class="here">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>state — Run の中を短く保つ<span class="path">example/state/</span></h1>
+<h1>state — saga の本体を短く保つ<span class="path">example/workflow/state/</span></h1>
 <p>アクティビティの入力が増えると、ステップを並べただけのワークフローは読めなくなります。入力と各ステップの出力を1つの構造体に持たせ、ステップをそのメソッドにします。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
@@ -90,11 +90,11 @@
 <h2>コードの形</h2>
 <p>これだけは実行時の経路ではなく、<strong>書き方</strong>の話です。</p>
 <div class="strip">
-  <div class="lane"><span class="tag">Run の body</span><span class="note">2行</span></div>
+  <div class="lane"><span class="tag">RunOrCompensate の body</span><span class="note">1ステップ1行</span></div>
   <div class="row">
     <div class="cell f" style="flex:0 0 auto;padding:9px 18px">w := &amp;fulfillment{in: in}<span class="sub2">return w.run(ctx, s)</span></div>
     <div class="arr">→</div>
-    <div class="cell s" style="flex:0 0 auto;padding:9px 18px">fulfillment<span class="sub2">in / reservation / charge / shipment</span></div>
+    <div class="cell s" style="flex:0 0 auto;padding:9px 18px">fulfillment<span class="sub2">in / reservation / charge / approvedBy / packing / shipment</span></div>
   </div>
   <div class="fail-mark q">▼ ステップはメソッド。state から入力を組み、結果を state に戻す</div>
   <div class="row">
@@ -102,19 +102,26 @@
     <div class="arr">→</div>
     <div class="cell f">w.chargeCard<span class="sub2">w.reservation を使う</span></div>
     <div class="arr">→</div>
-    <div class="cell f">w.ship<span class="sub2">w.charge を使う</span></div>
+    <div class="cell w">w.approve<span class="sub2">signal を待つ／Func</span></div>
+    <div class="arr">→</div>
+    <div class="cell f">w.pack</div>
+    <div class="arr">→</div>
+    <div class="cell f">w.ship<span class="sub2">w.charge と w.approvedBy を使う</span></div>
   </div>
 </div>
 
 <pre><code>func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
     w.reserve(ctx, s)
     w.chargeCard(ctx, s)
+    w.approve(ctx, s)
+    w.pack(ctx, s)
     w.ship(ctx, s)
 
     if err := s.Err(); err != nil {     // 分岐と戻り値の前に1回だけ見る
         return Receipt{}, err
     }
-    return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
+    return Receipt{Reservation: w.reservation, Charge: w.charge, ApprovedBy: w.approvedBy,
+        Pack: w.packing, Shipment: w.shipment}, nil
 }</code></pre>
 
 <div class="note-box">
@@ -123,33 +130,44 @@
   あります。メソッドの中で state からリクエストを組んでください。
 </div>
 
+<div class="note-box">
+  <strong>同じ saga を素の形でも書いてあります。</strong>
+  <code>workflow_flat.go</code> は上と同じ5ステップを <code>RunOrCompensate</code> の
+  クロージャに並べたもので、違うのは本体の書き方だけです。2つを並べて読むためのもので、
+  仕様が両方を動かして同じ <code>Receipt</code> が返ることを確かめています。
+</div>
+
 <h2>巻き戻しは基本形と同じ</h2>
-<p>書き方を変えてもロールバックが弱くなっていないこと、が仕様で見たいことです。</p>
+<p>書き方を変えてもロールバックが弱くなっていないこと、が仕様で見たいことです。
+approve はアクティビティではないので、履歴にも巻き戻しにも現れません。</p>
 <div class="strip">
   <div class="row">
     <div class="cell f">reserve</div><div class="arr">→</div>
     <div class="cell f">charge</div><div class="arr">→</div>
+    <div class="cell f">pack</div><div class="arr">→</div>
     <div class="cell u">ship ✕</div>
   </div>
   <div class="fail-mark">▼</div>
   <div class="row">
     <div class="cell u">reserve:undo</div><div class="arr">←</div>
     <div class="cell u">charge:undo</div><div class="arr">←</div>
+    <div class="cell u">pack:undo</div><div class="arr">←</div>
     <div class="cell u">ship:undo</div>
   </div>
 </div>
 
-<div class="spec"><b>## 分割しても途中失敗は逆順で取り消される</b>
+<div class="spec"><b>シナリオ: 最後で失敗すれば、4つ分が逆順で取り消される</b>
 
-* 状態を持つ注文 "half" を "ship" で失敗させる
-* saga は "no carrier" で失敗する
-* ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-* 注文は "reserve, charge, ship" を保持していない</div>
+  前提 状態を持つ注文 "half" を "ship" で失敗させる
+  もし 状態を持つ注文の承認を送る
+  ならば saga は "no carrier" で失敗する
+  かつ ステップ "reserve, charge, pack, ship, ship:undo, pack:undo, charge:undo, reserve:undo" が実行された
+  かつ 注文は "reserve, charge, pack, ship" を保持していない</div>
 
 <footer>
-  ソース: <code>example/state/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/state/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>

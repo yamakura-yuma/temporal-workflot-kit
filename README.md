@@ -44,39 +44,49 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 
 ```go
 func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-    var a *Activities
-
-    return saga.Run(ctx, saga.Options{
-        ActivityOptions:    workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second},
-        CompensationBudget: 5 * time.Minute,
-    }, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-        res, _ := saga.Step(ctx, s, "reserve",
-            saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
-        chg, _ := saga.Step(ctx, s, "charge",
-            saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in})
-        shp, _ := saga.Step(ctx, s, "ship",
-            saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in})
-
-        return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
+    ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+        StartToCloseTimeout:    10 * time.Second,
+        ScheduleToCloseTimeout: time.Minute,   // 補償はこれが無いと無制限にリトライする
     })
+
+    return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+        w := &fulfillment{in: in}
+
+        s.Step(ctx, "reserve", w.reserve, w.unreserve)
+        s.Step(ctx, "charge", w.chargeCard, w.refund)
+        s.Step(ctx, "ship", w.ship, w.cancelShipment)
+
+        return w.receipt(), nil
+    })
+}
+
+// ステップの半分は、ただのワークフローコード。ライブラリは何も包みません
+func (w *fulfillment) chargeCard(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Charge,
+        ChargeReq{Order: w.in, Reservation: w.reservation}).Get(ctx, &w.charge)
+}
+
+// 補償は、forward が書いたフィールドをそのまま読めます
+func (w *fulfillment) refund(ctx workflow.Context) error {
+    return workflow.ExecuteActivity(ctx, acts.Refund,
+        ChargeReq{Order: w.in, Charge: w.charge}).Get(ctx, nil)
 }
 ```
 
-ステップのエラーを `_` で捨てているのは手抜きではありません。最初の失敗以降、後続の
-`saga.Activity` は何もせず、`Run` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
+`s.Step` の戻り値を捨てているのは手抜きではありません。最初の失敗以降、後続の
+`s.Step` は何もせず、`RunOrCompensate` が元のエラーでワークフローを失敗させます。半端な `Receipt` は
 外に出ません。
 
 振る舞いは `docs/specs/` に実行できる仕様として置いてあり、`just spec` が実際の Temporal
 dev server を起動して確かめます。
 
 ```
-## キャンセルされた saga もロールバックされる
-
-* 課金の後で待機する注文 "cancelme"
-* "charge" が実行されたら saga をキャンセルする
-* saga は失敗する
-* ステップ "reserve, charge, charge:undo, reserve:undo" が実行された
-* 注文は "reserve, charge" を保持していない
+  シナリオ: キャンセルされた saga もロールバックされる
+    前提 課金の後で待機する注文 "cancelme"
+    もし "Charge" が実行されたら saga をキャンセルする
+    ならば saga は失敗する
+    かつ アクティビティ "Reserve, Charge, Refund, Unreserve" が実行された
+    かつ 注文は "Reserve, Charge" を保持していない
 ```
 
 ## 機能・特徴
@@ -85,12 +95,15 @@ dev server を起動して確かめます。
 | --- | --- |
 | ロールバック | 失敗すると、登録済みの補償を逆順で実行する |
 | キャンセル対応 | ワークフローがキャンセルされても補償は実行される |
-| 冪等キーの払い出し | ステップごとにキーを作り、forward と補償の両方に渡す |
-| 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
-| 失敗の報告 | 補償が失敗したら、型付きのエラーと検索属性で残す。元のエラーは消さない |
-| 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
-| ステップの種類を選べる | アクティビティ / 子ワークフロー / 自分の関数。**forward と補償で別々に選べる**。混ざっても1つの逆順で巻き戻る |
-| 逃げ道 | `Add` で任意の取り消しを登録できる |
+| 登録の順序 | 補償は forward を**実行する前**に登録される。タイムアウトした forward も取り消される |
+| 失敗の報告 | 補償が失敗したら、型付きのエラーと、どのステップかの一覧で残す。元のエラーは消さない |
+| 出口が1つ | エラーチェックを忘れても、ステップが失敗していればワークフローは失敗する |
+| 巻き戻しの制御 | `ParallelCompensation` と `ContinueWithError`（Java SDK の `Saga` と同じ2つ） |
+
+ステップの両半分は `func(workflow.Context) error` です。**ライブラリは
+`workflow.ExecuteActivity` を包みません。** アクティビティで実行するのも、子ワークフローで
+実行するのも、signal を待つのも、その関数に何を書くかの違いです。タイムアウトもリトライも
+普通に context へ載せてください。
 
 なぜこの形なのか、素直に書くと何が壊れるのかは [docs/design.md](docs/design.md) に
 コード付きで書いてあります。Temporal が初めてなら、その前に登場人物を図で押さえる
@@ -103,17 +116,18 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 ```
 
 必要なのは Go 1.26 以降と Temporal Go SDK v1.49 以降。サーバ側に特別な設定は要りません。
-補償の失敗を検索属性で可視化する場合だけ、そのキーをサーバに登録しておきます。
+補償の失敗を検索属性で可視化するなら、そのキーをサーバに登録したうえで、ワークフロー側で
+`saga.CompensationFailedType` を見て自分で立ててください（`example/workflow/order/`）。
 
 ## 使用方法
 
-デモの後半がそのまま使い方です。`saga.Run` にワークフロー本体を渡し、各ステップを
-`saga.Activity` で書きます。
+デモの後半がそのまま使い方です。`saga.RunOrCompensate` にワークフロー本体を渡し、
+`s.Step` に forward と補償の2つの関数を渡します。
 
-アクティビティ側には2つだけ約束があります。forward は冪等キーを**原子的に** claim する
-こと、補償は取り消すものが無いときに成功すること。どちらも外すとロールバックが壊れるので、
-[docs/activity-contract.md](docs/activity-contract.md) を先に読んでください。塞げていない
-穴も同じ文書に書いてあります。
+**このライブラリが守るのは2つだけです。** 補償を forward より先に登録すること、失敗したら
+切り離した context で逆順に実行すること。残りは利用者側の契約で、守らないとロールバックが
+静かに壊れます。先に [docs/interface.md](docs/interface.md) を読んでください。塞げていない
+穴も同じ文書にあります。
 
 ### 他のパターン
 
@@ -122,14 +136,18 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 それぞれに `diagram.html` を置いてあります。正常系と失敗時にどの順で何が走るかは、
 そちらをブラウザで開くのが早いです。
 
+アクティビティは [`example/activity/`](example/activity/) に1セットだけあります。
+ワークフローごとの写しは置いていません。アクティビティはワークフローではなくワーカーに
+属するもので、下の6つは同じ `Reserve` や `Charge` を呼びます。
+
 | 例 | 何を見せているか | 図 |
 | --- | --- | --- |
-| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを claim するアクティビティの書き方 | [図](example/order/diagram.html) |
-| [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/pipeline/diagram.html) |
-| [`example/state/`](example/state/) | 入力が多い saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ | [図](example/state/diagram.html) |
-| [`example/childflow/`](example/childflow/) | 子ワークフローで実行し、アクティビティで取り消すステップ。冪等キーは executor を跨いで同じ | [図](example/childflow/diagram.html) |
-| [`example/approval/`](example/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/approval/diagram.html) |
-| [`example/external/`](example/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/external/diagram.html) |
+| [`example/workflow/order/`](example/workflow/order/) | 基本形。3ステップと補償、巻き戻しが失敗したときの検知 | [図](example/workflow/order/diagram.html) |
+| [`example/workflow/pipeline/`](example/workflow/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/workflow/pipeline/diagram.html) |
+| [`example/workflow/state/`](example/workflow/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、本体を1ステップ1行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/workflow/state/diagram.html) |
+| [`example/workflow/childflow/`](example/workflow/childflow/) | forward を子ワークフロー、取り消しをアクティビティで実行するステップ。冪等キーを境界の向こうへ渡す | [図](example/workflow/childflow/diagram.html) |
+| [`example/workflow/approval/`](example/workflow/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/workflow/approval/diagram.html) |
+| [`example/workflow/external/`](example/workflow/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/workflow/external/diagram.html) |
 
 形ごとの書き方は [docs/patterns.md](docs/patterns.md) に。
 
@@ -137,19 +155,14 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 | | |
 | --- | --- |
-| `saga.Run(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
-| `saga.Step(ctx, s, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
-| `saga.Activity(f)` / `saga.UndoActivity(f)` | その半分をアクティビティで実行する |
-| `saga.ChildWorkflow(f)` / `saga.UndoChildWorkflow(f)` | その半分を子ワークフローで実行する |
-| `saga.Func(f)` / `saga.UndoFunc(f)` | その半分をこのワークフローの中で呼ぶ |
-| `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`saga.Func` の中で使う |
-| `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
-| `saga.IdempotencyKey(ctx)` | アクティビティ側から冪等キーを読む |
-| `saga.IdempotencyKeyOf(ctx)` | 子ワークフロー側から冪等キーを読む |
+| `saga.RunOrCompensate(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
+| `s.Step(ctx, name, do, undo)` | 補償を登録してから forward を実行する。両方 `func(workflow.Context) error` |
+| `s.Err()` / `s.ClearErr()` | 最初に失敗したステップのエラーと、それを握るとき |
+| `saga.Options` | `ParallelCompensation` と `ContinueWithError` の2つだけ。どちらも任意 |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 
-`CompensationBudget` は必須です。補償は外から誰もキャンセルできない context で走るので、
-上限が無いと詰まったときに止める手段がありません。詳細は `go doc ./saga`。
+補償は外から誰もキャンセルできない context で走ります。**`ScheduleToCloseTimeout` を必ず
+設定してください。** Temporal の既定のリトライは無制限で、止めるのはこれだけです。
 
 ## 貢献方法
 

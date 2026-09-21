@@ -1,5 +1,9 @@
 package saga
 
+// CompensationFailedType is the counterpart of Java's
+// Saga.CompensationException. CompensationReport is an extension: Java and PHP
+// report the exception alone, without saying which steps were left undone.
+
 import (
 	"fmt"
 	"strings"
@@ -18,8 +22,10 @@ const CompensationFailedType = "CompensationFailed"
 type CompensationReport struct {
 	// Failed lists steps whose compensation ran and returned an error.
 	Failed []string `json:"failed"`
-	// Skipped lists steps whose compensation never ran, because the budget ran
-	// out or StopOnCompensationError was set.
+	// Skipped lists steps whose compensation never ran: an earlier one failed
+	// and Options.ContinueWithError was not set. It is always empty under
+	// ParallelCompensation, where every compensation is dispatched before any
+	// of them is awaited.
 	Skipped []string `json:"skipped"`
 }
 
