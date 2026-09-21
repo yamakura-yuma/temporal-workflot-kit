@@ -1,22 +1,21 @@
-// Package stepImpl implements the steps the specifications under docs/specs/ are
-// written in.
+// Package specsteps implements the steps the specifications under docs/specs/
+// are written in.
 //
-// The suite runs one Temporal dev server and one worker for the whole run,
-// started in a BeforeSuite hook. Scenarios are kept apart by using their own
+// The suite runs one Temporal dev server and one worker per example for the
+// whole run, started in TestMain. Scenarios are kept apart by using their own
 // order id, and by the fact that saga idempotency keys are scoped to a workflow
 // run.
-package stepImpl
+package specsteps
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"testing"
 	"time"
 
-	"github.com/getgauge-contrib/gauge-go/gauge"
-	m "github.com/getgauge-contrib/gauge-go/gauge_messages"
-	"github.com/getgauge-contrib/gauge-go/testsuit"
+	"github.com/cucumber/godog"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -40,8 +39,12 @@ const uiPort = "8233"
 // everywhere else, which is what keeps `just spec` and `just ci` unchanged.
 const holdEnv = "SPEC_HOLD"
 
-// Suite-wide, because they are started once per run. Per-scenario state goes in
-// Gauge's scenario store instead, so that it cannot leak between scenarios.
+// specsDir is where the .feature files live. godog defaults to ./features; this
+// keeps the specifications next to the prose documentation instead.
+const specsDir = "../docs/specs"
+
+// Suite-wide, because they are started once per run. Per-scenario state lives in
+// the scenario's context instead, so that it cannot leak between scenarios.
 var (
 	devServer       *testsuite.DevServer
 	temporalClient  client.Client
@@ -57,12 +60,62 @@ var (
 	stateLedger     *state.Ledger
 )
 
-var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
+func TestMain(m *testing.M) {
+	if err := startSuite(); err != nil {
+		fmt.Fprintf(os.Stderr, "could not start the spec suite: %v\n", err)
+		stopSuite()
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	stopSuite()
+	os.Exit(code)
+}
+
+// TestFeatures runs every scenario under docs/specs/.
+//
+// Strict makes an undefined, pending or ambiguous step fail the suite, which is
+// the only thing that ties a step sentence to a Go function: nothing in the
+// compiler does. TestingT turns every scenario into a Go subtest, so
+// `go test -run 'TestFeatures/<シナリオ名>'` runs one of them.
+func TestFeatures(t *testing.T) {
+	suite := godog.TestSuite{
+		ScenarioInitializer: InitializeScenario,
+		Options: &godog.Options{
+			Format:   "pretty",
+			Paths:    []string{specsDir},
+			Strict:   true,
+			TestingT: t,
+		},
+	}
+
+	if suite.Run() != 0 {
+		t.Fatal("the specifications under docs/specs/ did not pass")
+	}
+}
+
+// InitializeScenario registers every step and gives each scenario a store of
+// its own. The store is a pointer, so steps mutate it without handing a new
+// context back.
+func InitializeScenario(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(ctx, scenarioKey{}, &scenarioState{}), nil
+	})
+
+	registerOrderSteps(sc)
+	registerApprovalSteps(sc)
+	registerChildflowSteps(sc)
+	registerExternalSteps(sc)
+	registerPipelineSteps(sc)
+	registerStateSteps(sc)
+}
+
+func startSuite() error {
 	// The dev server is the temporal CLI, which the dev image gets from
 	// flake.nix. Failing here beats silently downloading a server binary.
 	exe, err := exec.LookPath("temporal")
 	if err != nil {
-		fail("temporal CLI not on PATH; run these inside the dev container with `just spec`: %v", err)
+		return fmt.Errorf("temporal CLI not on PATH; run these inside the dev container with `just spec`: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -89,7 +142,7 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 		),
 	})
 	if err != nil {
-		fail("start the dev server: %v", err)
+		return fmt.Errorf("start the dev server: %w", err)
 	}
 
 	temporalClient = devServer.Client()
@@ -101,7 +154,7 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	temporalWorker.RegisterWorkflow(order.OrderWorkflow)
 	temporalWorker.RegisterActivity(activities)
 	if err := temporalWorker.Start(); err != nil {
-		fail("start the worker: %v", err)
+		return fmt.Errorf("start the worker: %w", err)
 	}
 
 	// The approval example declares its own task queue, so it needs its own
@@ -110,7 +163,7 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	approvalWorker.RegisterWorkflow(approval.ApprovalWorkflow)
 	approvalWorker.RegisterActivity(activities)
 	if err := approvalWorker.Start(); err != nil {
-		fail("start the approval worker: %v", err)
+		return fmt.Errorf("start the approval worker: %w", err)
 	}
 
 	pipelineLedger = pipeline.NewLedger()
@@ -118,7 +171,7 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	pipelineWorker.RegisterWorkflow(pipeline.PipelineWorkflow)
 	pipelineWorker.RegisterActivity(pipeline.NewActivities(pipelineLedger))
 	if err := pipelineWorker.Start(); err != nil {
-		fail("start the pipeline worker: %v", err)
+		return fmt.Errorf("start the pipeline worker: %w", err)
 	}
 
 	// The packing children inherit this task queue, so one worker covers the
@@ -129,7 +182,7 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	childflowWorker.RegisterWorkflow(childflow.PackWorkflow)
 	childflowWorker.RegisterActivity(childflow.NewActivities(childflowLedger))
 	if err := childflowWorker.Start(); err != nil {
-		fail("start the childflow worker: %v", err)
+		return fmt.Errorf("start the childflow worker: %w", err)
 	}
 
 	stateLedger = state.NewLedger()
@@ -137,7 +190,7 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	stateWorker.RegisterWorkflow(state.StateWorkflow)
 	stateWorker.RegisterActivity(state.NewActivities(stateLedger))
 	if err := stateWorker.Start(); err != nil {
-		fail("start the state worker: %v", err)
+		return fmt.Errorf("start the state worker: %w", err)
 	}
 
 	externalWorker = worker.New(temporalClient, external.TaskQueue, worker.Options{})
@@ -145,28 +198,20 @@ var _ = gauge.BeforeSuite(func(*m.ExecutionInfo) {
 	externalWorker.RegisterWorkflow(external.InventoryWorkflow)
 	externalWorker.RegisterActivity(external.NewActivities(external.NewLedger()))
 	if err := externalWorker.Start(); err != nil {
-		fail("start the external worker: %v", err)
+		return fmt.Errorf("start the external worker: %w", err)
 	}
-}, []string{}, testsuit.AND)
 
-var _ = gauge.AfterSuite(func(*m.ExecutionInfo) {
-	if externalWorker != nil {
-		externalWorker.Stop()
-	}
-	if stateWorker != nil {
-		stateWorker.Stop()
-	}
-	if childflowWorker != nil {
-		childflowWorker.Stop()
-	}
-	if pipelineWorker != nil {
-		pipelineWorker.Stop()
-	}
-	if approvalWorker != nil {
-		approvalWorker.Stop()
-	}
-	if temporalWorker != nil {
-		temporalWorker.Stop()
+	return nil
+}
+
+func stopSuite() {
+	for _, w := range []worker.Worker{
+		externalWorker, stateWorker, childflowWorker,
+		pipelineWorker, approvalWorker, temporalWorker,
+	} {
+		if w != nil {
+			w.Stop()
+		}
 	}
 
 	// The workers are down by now, but the server still answers for history, so
@@ -182,10 +227,4 @@ var _ = gauge.AfterSuite(func(*m.ExecutionInfo) {
 	if devServer != nil {
 		_ = devServer.Stop()
 	}
-}, []string{}, testsuit.AND)
-
-// fail ends the current step. testsuit.T.Fail panics, which the runner catches
-// and reports against the step that was running.
-func fail(format string, args ...any) {
-	testsuit.T.Fail(fmt.Errorf(format, args...))
 }

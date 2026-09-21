@@ -19,17 +19,15 @@ Temporal のワークフローを書くための Go の部品集。今入って�
   example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
   こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
   得た事実の出自と、その版）
-- `docs/specs/` — Gauge の markdown で書かれた実行される仕様。日本語。結合テストの
-  本体はこちら。スイートがプロセス内に起動する実際の Temporal dev server に対して
-  実行する。コードとの対応づけはステップ文が `gauge.Step(...)` の文字列と一致する
-  ことだけ。場所は `env/default/default.properties` の `gauge_specs_dir` で決まる
-  （コマンドライン引数では変わらない）
-- `stepImpl/` — 仕様文と Go を繋ぐ語彙層。そのステップの Go 実装と、サーバとワーカーを
-  起動するスイートフック。名前は gauge-go の既定（`gauge init go` が作る）で、この
-  リポジトリの発明ではない。理由は `docs/development.md`「置き場所」
+- `docs/specs/` — 日本語の Gherkin（`.feature`）で書かれた実行される仕様。結合テストの
+  本体はこちら。godog が走らせ、スイートがプロセス内に起動する実際の Temporal dev
+  server に対して実行する。コードとの対応づけはステップ文が登録された正規表現に一致
+  することだけで、それを検査するのはスイートの `Strict: true`。場所は
+  `specsteps/suite_test.go` の `Paths` で決まる（godog の既定は `./features`）
+- `specsteps/` — 仕様文と Go を繋ぐ語彙層。そのステップの Go 実装と、サーバとワーカーを
+  起動する `TestMain`。中身はすべて `_test.go`。理由は `docs/development.md`「置き場所」
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
-  契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
-  通常パッケージに置く
+  契約の実装例でもある。`specsteps/` が import するので通常パッケージに置く
 - `example/approval/` — signal 待ちを `saga.Func` でステップにする例。
   アクティビティは order のものを使い、待つ部分だけを見せる
 - `example/pipeline/` — 前段の出力が次段の入力になる例
@@ -50,16 +48,15 @@ example は1テーマ1個。増やすときもこの単位を守り、`diagram.h
 リビルド無しで反映される。
 
 - `just` — レシピ一覧
-- `just build` / `just vet` / `just test` — Go のビルド、vet、ユニットテスト
-- `just spec` — `docs/specs/` の仕様を実際の dev server に対して実行
+- `just build` / `just vet` / `just test` — Go のビルド、vet、テスト。仕様は godog の
+  普通の Go テストなので、`just test`（`go test ./...`）が仕様まで含む
+- `just spec` — 仕様だけを verbose で実行（実際の dev server 相手）。シナリオは Go の
+  サブテストなので `just spec -run 'TestFeatures/<シナリオ名>'` で1本だけ走らせられる
 - `just spec-ui` — 同じ実行だが dev server を残し、履歴を `http://localhost:8233`
   で読めるようにする。落ちたシナリオを調べるとき
-- `just spec-validate` — 全ステップに実装があるかを、実行せずに確認
-- `just spec-steps` — どの Go 関数がどのステップを実装しているかの対応表
 - `just docs-check` — docs と README のコード例が現行 API と合っているか、上流由来の
   ノートが `go.mod` の SDK 版と合っているか
-- `just ci` — fmt-check, vet, build, ユニットテスト, docs-check, spec-validate, spec。
-  変更を出す前に通す
+- `just ci` — fmt-check, vet, build, テスト, docs-check。変更を出す前に通す
 - `just shell` — dev コンテナの対話シェル
 
 ## スキル
@@ -71,7 +68,7 @@ example は1テーマ1個。増やすときもこの単位を守り、`diagram.h
   このリポジトリが自分で書いているエージェント設定はこれだけ。
   - `saga-package` — `saga/` パッケージが依存している不変条件と、ステップの足し方
   - `temporal-review` — 決定性・冪等性・リトライの、出す前のチェックリスト
-  - `gauge-specs` — `docs/specs/` の仕様と `stepImpl/` の書き方
+  - `godog-specs` — `docs/specs/` の仕様と `specsteps/` の書き方
   - `upstream-docs` — 上流のドキュメントを指すか写すかの基準と、腐りの検出
 - `core-principal` — 共有ハーネス（ルール、git のガードフック、`core-*` スキル）。
   [dotfiles](https://github.com/yamakura-yuma/dotfiles) リポジトリからコミットで
