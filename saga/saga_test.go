@@ -3,13 +3,11 @@ package saga_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
@@ -24,47 +22,31 @@ type req struct {
 	Fail bool   `json:"fail"`
 }
 
-// recorder captures the order activities ran in and the idempotency key each
-// one saw. Activities run on their own goroutines in the test environment, so
-// it is guarded.
+// recorder captures the order activities ran in. Activities run on their own
+// goroutines in the test environment, so it is guarded.
 type recorder struct {
 	mu    sync.Mutex
 	calls []string
-	keys  map[string]string
 }
 
-func newRecorder() *recorder { return &recorder{keys: map[string]string{}} }
+func newRecorder() *recorder { return &recorder{} }
 
-func (r *recorder) record(call string, key string) {
+func (r *recorder) record(call string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, call)
-	r.keys[call] = key
 }
 
-func (r *recorder) snapshot() ([]string, map[string]string) {
+func (r *recorder) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	calls := append([]string(nil), r.calls...)
-	keys := map[string]string{}
-	for k, v := range r.keys {
-		keys[k] = v
-	}
-	return calls, keys
+	return append([]string(nil), r.calls...)
 }
 
 type acts struct{ r *recorder }
 
-// stepOf is the step an activity is running for. The library names activities
-// "<RunID>/<step>", and a compensation's carries ":undo", so stripping that
-// gives both halves of a step the same answer.
-func stepOf(ctx context.Context) string {
-	return strings.TrimSuffix(activity.GetInfo(ctx).ActivityID, ":undo")
-}
-
 func (a *acts) Do(ctx context.Context, in req) (string, error) {
-	key := stepOf(ctx)
-	a.r.record("do:"+in.Step, key)
+	a.r.record("do:" + in.Step)
 	if in.Fail {
 		return "", errors.New("forward failed: " + in.Step)
 	}
@@ -72,14 +54,12 @@ func (a *acts) Do(ctx context.Context, in req) (string, error) {
 }
 
 func (a *acts) Undo(ctx context.Context, in req) error {
-	key := stepOf(ctx)
-	a.r.record("undo:"+in.Step, key)
+	a.r.record("undo:" + in.Step)
 	return nil
 }
 
 func (a *acts) UndoFails(ctx context.Context, in req) error {
-	key := stepOf(ctx)
-	a.r.record("undo:"+in.Step, key)
+	a.r.record("undo:" + in.Step)
 	return errors.New("compensation failed: " + in.Step)
 }
 
@@ -187,7 +167,7 @@ func TestSuccessDoesNotCompensate(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "do:c"}, calls)
 
 	var out []string
@@ -209,69 +189,18 @@ func TestCompensatesInReverseIncludingTheFailedStep(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t,
 		[]string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"},
 		calls)
 }
 
-// A step's forward activity and its compensation must observe the same
-// idempotency key: that is how a compensation finds the work it has to undo.
-//
-// The name is read off the activity's ActivityID, so this only holds when the
-// real activity function runs. A mock set up with .Return(value) replaces the
-// function and would never look at its context -- use .Return(fn) or .Run(fn)
-// if you need a mock here.
-func TestForwardAndCompensationShareTheKey(t *testing.T) {
-	env, r := newEnv(t)
-
-	env.ExecuteWorkflow(planWorkflow, plan{
-		Steps:      []stepSpec{{Name: "a"}, {Name: "b", Fail: true}},
-		SleepAfter: -1,
-	})
-	require.True(t, env.IsWorkflowCompleted())
-
-	_, keys := r.snapshot()
-	for _, step := range []string{"a", "b"} {
-		fwd, undo := keys["do:"+step], keys["undo:"+step]
-		require.NotEmpty(t, fwd, "step %s: forward saw no key", step)
-		require.Equal(t, fwd, undo, "step %s: forward and compensation disagree", step)
-		require.True(t, strings.HasSuffix(fwd, "/"+step), "key %q should end in the step name", fwd)
-	}
-	require.NotEqual(t, keys["do:a"], keys["do:b"], "each step needs its own key")
-}
-
-// The name a step puts on its activities is derived from the run, not from
-// FirstRunID.
-//
-// FirstRunID is preserved across ContinueAsNew, Retry, Cron and Reset, so a
-// name built on it would repeat the previous run's names: the two runs' steps
-// would be indistinguishable in a history, and a caller who built an
-// idempotency key the same way -- which docs/activity-contract.md tells them to
-// -- would have every step of the second run look like one already applied.
-func TestStepNameIsScopedToTheRun(t *testing.T) {
-	env, r := newEnv(t)
-
-	env.ExecuteWorkflow(planWorkflow, plan{
-		Steps:      steps("charge"),
-		SleepAfter: -1,
-	})
-	require.NoError(t, env.GetWorkflowError())
-
-	_, keys := r.snapshot()
-	key := keys["do:charge"]
-
-	require.NotEmpty(t, key)
-	require.True(t, strings.HasSuffix(key, "/charge"), "got %q", key)
-	require.Contains(t, key, "/",
-		"a purely numeric name can collide with the SDK's default ActivityID")
-
-	// The run id is the other half, and it is not the FirstRunID: the test
-	// environment leaves that empty, so a name built on it would be untestable
-	// as well as wrong.
-	runID := strings.TrimSuffix(key, "/charge")
-	require.NotEmpty(t, runID)
-}
+// The library no longer gives the two halves of a step a shared idempotency
+// key, and no longer names the activities a step starts. It does not touch
+// ActivityID at all: a key belongs in the request the caller sends, and a
+// readable history is the caller's to arrange. What used to be checked here now
+// lives where it belongs -- docs/specs/childflow.feature checks that a workflow
+// hands both halves of its packing step the same key.
 
 // A body that returns nil after a step failed must still fail the workflow and
 // compensate. Without this, forgetting one error check completes the workflow
@@ -290,7 +219,7 @@ func TestNilErrorFromBodyStillCompensates(t *testing.T) {
 	require.Error(t, err, "a failed step must fail the workflow even if the body returned nil")
 	require.Contains(t, err.Error(), "forward failed: b")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "undo:b", "undo:a"}, calls,
 		"step c must be skipped, and a and b compensated")
 
@@ -316,7 +245,7 @@ func TestCompensatesAfterCancellation(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "undo:a"}, calls,
 		"the compensation for step a must run despite the cancellation")
 }
@@ -354,7 +283,7 @@ func TestCompensationFailureKeepsTypeAndCause(t *testing.T) {
 	require.Contains(t, err.Error(), "compensation did not finish cleanly")
 	require.NotNil(t, appErr.Unwrap(), "the original failure must stay in the cause chain")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "undo:b", "undo:a"}, calls,
 		"a failing compensation must not stop the ones still queued")
 }
@@ -371,7 +300,7 @@ func TestStepWithoutCompensation(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "undo:b"}, calls)
 }
 
@@ -463,17 +392,11 @@ func TestChildWorkflowCompensatesInOneOrder(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 
-	calls, keys := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t,
 		[]string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"},
 		calls,
 		"the child workflow step must take its place in the one reverse order")
-
-	// The child's halves run activities of their own, so the key those
-	// activities see is the child's, not the saga step's. What the saga
-	// guarantees is that the two children are named for the same step.
-	require.NotEmpty(t, keys["do:b"])
-	require.NotEmpty(t, keys["undo:b"])
 }
 
 // --- waiting for a signal ----------------------------------------------------
@@ -574,7 +497,7 @@ func TestInlineStepSkipsAfterAFailedStep(t *testing.T) {
 	require.ErrorContains(t, env.GetWorkflowError(), "forward failed: a",
 		"and the earlier failure is what gets reported")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "undo:a"}, calls,
 		"and the rollback should still happen")
 }
@@ -633,7 +556,7 @@ func TestFirstFailureWins(t *testing.T) {
 	require.NotContains(t, err.Error(), "nobody reviewed",
 		"the body's conclusion was drawn from a skipped wait, not from the truth")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:reserve", "undo:reserve"}, calls)
 }
 
@@ -676,7 +599,7 @@ func TestCompensationStopsAtTheFirstFailure(t *testing.T) {
 	require.Equal(t, []string{"b"}, report.Failed)
 	require.Equal(t, []string{"a"}, report.Skipped, "a never ran and has to be reported")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "do:c", "undo:c", "undo:b"}, calls,
 		"a's compensation must not run")
 }
@@ -701,7 +624,7 @@ func TestContinueWithErrorRunsTheRest(t *testing.T) {
 	require.Equal(t, []string{"b"}, report.Failed)
 	require.Empty(t, report.Skipped)
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.Equal(t, []string{"do:a", "do:b", "do:c", "undo:c", "undo:b", "undo:a"}, calls)
 }
 
@@ -728,7 +651,7 @@ func TestParallelCompensationRunsThemAll(t *testing.T) {
 	require.Equal(t, []string{"b"}, report.Failed)
 	require.Empty(t, report.Skipped, "nothing is skipped: they were all dispatched")
 
-	calls, _ := r.snapshot()
+	calls := r.snapshot()
 	require.ElementsMatch(t,
 		[]string{"do:a", "do:b", "do:c", "undo:a", "undo:b", "undo:c"}, calls,
 		"every compensation runs, including the ones after the failure")

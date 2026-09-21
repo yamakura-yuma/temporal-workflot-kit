@@ -83,7 +83,7 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		undone, err := packKeyIn(parent, "pack:undo")
+		undone, err := packKeyIn(parent, "Unpack")
 		if err != nil {
 			return fmt.Errorf("取り消し側: %w", err)
 		}
@@ -113,11 +113,12 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 	})
 }
 
-// packKeyIn decodes the idempotency key out of the PackReq a step was handed.
-func packKeyIn(h *sagaHistory, step string) (string, error) {
-	payloads, ok := h.input[step]
+// packKeyIn decodes the idempotency key out of the PackReq an activity was
+// handed.
+func packKeyIn(h *sagaHistory, name string) (string, error) {
+	payloads, ok := h.input[name]
 	if !ok {
-		return "", fmt.Errorf("ステップ %q は実行されていません", step)
+		return "", fmt.Errorf("アクティビティ %q は実行されていません", name)
 	}
 
 	var req struct {

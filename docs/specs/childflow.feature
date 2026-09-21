@@ -20,12 +20,12 @@
     前提 子ワークフローを含む注文 "mixed" を "ship" で失敗させる
     ならば saga は "no carrier available" で失敗する
     かつ 子ワークフロー "pack" が起動された
-    かつ ステップ "reserve, ship, ship:undo, pack:undo, reserve:undo" が実行された
+    かつ アクティビティ "Reserve, Ship, CancelShipment, Unpack, Unreserve" が実行された
     かつ 梱包と取り消しが見た冪等キーは一致する
-    かつ 注文は "reserve, ship" を保持していない
+    かつ 注文は "Reserve, Ship" を保持していない
 
   シナリオ: 正常系では取り消しは起動されない
     前提 子ワークフローを含む注文 "packed"
     ならば saga は成功する
     かつ 子ワークフロー "pack" が起動された
-    かつ ステップ "reserve, ship" が実行された
+    かつ アクティビティ "Reserve, Ship" が実行された

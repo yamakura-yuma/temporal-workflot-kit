@@ -38,29 +38,15 @@ import "go.temporal.io/sdk/workflow"
 //
 // undo may be nil for a step with nothing to take back.
 //
-// # The activity id
+// # What name is for
 //
-// Step names the activities do starts: their ActivityID becomes
-// "<RunID>/<name>", and a compensation's is that plus ":undo". This is for
-// reading a history -- the Temporal UI lists the steps by name instead of by a
-// serial number, and that is how docs/specs/ identifies them.
+// name identifies the step in CompensationReport, and two steps may not share
+// one. It does not reach Temporal: this package does not touch ActivityID, so
+// do is free to start as many activities as it likes, and the options on the
+// context are yours alone.
 //
-// It also means one activity per step. A do that starts two would give them the
-// same id and the server would reject the second, which is loud rather than
-// subtle.
-//
-// Set the options before calling Step. If a step needs its own -- a
-// compensation usually wants more attempts than the forward half did -- read
-// them, change what you want, and put them back, because replacing the struct
-// wholesale drops the id along with everything else:
-//
-//	opts := workflow.GetActivityOptions(ctx)
-//	opts.RetryPolicy = &temporal.RetryPolicy{MaximumAttempts: 5}
-//	ctx = workflow.WithActivityOptions(ctx, opts)
-//
-// An idempotency key is not this id and is not the library's business: build
-// one from the run and the step name and put it in the request, where the
-// service you are calling can enforce it. See docs/activity-contract.md.
+// If you want a history that reads the way the saga was written, set
+// ActivityID yourself in do -- it is one field on ActivityOptions.
 func (s *Saga) Step(ctx workflow.Context, name string, do, undo func(workflow.Context) error) error {
 	if s.err != nil {
 		return s.err
@@ -70,25 +56,13 @@ func (s *Saga) Step(ctx workflow.Context, name string, do, undo func(workflow.Co
 		return err
 	}
 
-	id := stepKey(ctx, name)
-
 	if undo != nil {
-		s.addCompensation(name, func(cctx workflow.Context) error {
-			return undo(withActivityID(cctx, id+undoSuffix))
-		})
+		s.addCompensation(name, undo)
 	}
 
-	if err := do(withActivityID(ctx, id)); err != nil {
+	if err := do(ctx); err != nil {
 		s.fail(err)
 		return err
 	}
 	return nil
-}
-
-// withActivityID puts id on the context's activity options, leaving everything
-// else the caller set alone.
-func withActivityID(ctx workflow.Context, id string) workflow.Context {
-	opts := workflow.GetActivityOptions(ctx)
-	opts.ActivityID = id
-	return workflow.WithActivityOptions(ctx, opts)
 }

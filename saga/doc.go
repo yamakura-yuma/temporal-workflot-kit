@@ -35,43 +35,52 @@
 //	        ChargeReq{Charge: w.charge}).Get(ctx, nil)
 //	}
 //
-// # What the library takes care of
+// # What this is, and what it adds
 //
-// Compensations run on a context obtained from workflow.NewDisconnectedContext.
-// This matters more than it looks: a canceled workflow context fails every
-// subsequent activity immediately, so compensation written the obvious way does
-// nothing in the one situation it exists for.
+// Two Temporal SDKs ship a saga helper: Java's io.temporal.workflow.Saga and
+// PHP's Temporal\Workflow\Saga, which is a port of it. Go ships none, which is
+// why samples-go writes the pattern out by hand. This package is the Java one's
+// shape plus the three things it leaves to the caller.
 //
-// Compensations are registered before the forward half runs, not after it
-// succeeds, so a step that timed out -- and may well have taken effect on a
-// worker that never reported back -- is still rolled back.
+// From Java and PHP, under the same names:
 //
-// A step failure makes every later step a no-op, and Run returns that error
-// even if the body returned nil, discarding the body's result. Forgetting an
-// error check therefore fails the workflow instead of completing it with half
-// its side effects applied.
+//	a list of compensations, run in reverse order
+//	Options.ParallelCompensation   fire them all at once instead
+//	Options.ContinueWithError      keep going after one of them fails
+//	an error type of its own for a compensation that failed
 //
-// Step names the activities a step starts, so a history reads the way the saga
-// was written: "<RunID>/charge", and "<RunID>/charge:undo" for its
-// compensation.
+// PHP adds one more, and so does this: PHP runs compensate() inside
+// Workflow::asyncDetached, and here they run on a context from
+// workflow.NewDisconnectedContext. This matters more than it looks. A canceled
+// workflow context fails every subsequent activity immediately, so compensation
+// written the obvious way does nothing in the one situation it exists for.
+// Java's Saga does not do this.
 //
-// That is the whole of it. Everything else is Temporal's, and stays yours to
+// What this package adds beyond both:
+//
+// Step registers the compensation before running the forward half, never after
+// it succeeds. Java's and PHP's examples both call addCompensation after the
+// forward call returned, so a step that timed out -- and may well have taken
+// effect on a worker that never reported back -- leaves nothing registered to
+// undo it.
+//
+// RunOrCompensate owns the rollback, so there is no compensate() to forget and
+// one place for the body to leave by. A step failure makes every later step a
+// no-op, and Run returns that error even if the body returned nil, discarding
+// the body's result: forgetting an error check fails the workflow instead of
+// completing it with half its side effects applied. A step's failure also
+// outranks an error the body produced afterwards, because once a step has
+// failed the body tends to reach a branch that reads a zero value and reports
+// something untrue. Call s.Clear() before returning your own error if you have
+// handled the step failure and mean to replace it.
+//
+// CompensationReport names the steps whose compensation failed or never ran.
+// Java and PHP report only the exception.
+//
+// That is the whole of it. Everything else is Temporal's and stays yours to
 // write: ExecuteActivity, ExecuteChildWorkflow, a signal, the options on the
-// context, and what you do with the result.
-//
-// # Options
-//
-// Both are off by default and both are named after the Java SDK's
-// io.temporal.workflow.Saga, which has the same two:
-//
-//	ParallelCompensation  fire every compensation at once instead of running
-//	                      them in reverse order
-//	ContinueWithError     keep going after a compensation fails, instead of
-//	                      stopping and reporting the rest as skipped
-//
-// The Java SDK stops at the first failure too. Consider taking the other one:
-// a refund failing is not much of a reason to leave the stock reserved as
-// well.
+// context, the ActivityID if you want a history that reads the way the saga was
+// written, and what you do with the result.
 //
 // # What you still have to do yourself
 //

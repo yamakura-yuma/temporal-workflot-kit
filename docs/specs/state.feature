@@ -23,21 +23,21 @@
     前提 状態を持つ注文 "ok"
     もし 状態を持つ注文の承認を送る
     ならば saga は成功する
-    かつ ステップ "reserve, charge, pack, ship" が実行された
+    かつ アクティビティ "Reserve, Charge, Pack, Ship" が実行された
 
   シナリオ: 承認されなければ、そこまでの2つが逆順で取り消される
     前提 状態を持つ注文 "denied"
     もし 状態を持つ注文の却下を送る
     ならば saga は "ApprovalDenied" で失敗する
-    かつ ステップ "reserve, charge, charge:undo, reserve:undo" が実行された
-    かつ 注文は "reserve, charge" を保持していない
+    かつ アクティビティ "Reserve, Charge, Refund, Unreserve" が実行された
+    かつ 注文は "Reserve, Charge" を保持していない
 
   シナリオ: 最後で失敗すれば、4つ分が逆順で取り消される
     前提 状態を持つ注文 "half" を "ship" で失敗させる
     もし 状態を持つ注文の承認を送る
     ならば saga は "no carrier" で失敗する
-    かつ ステップ "reserve, charge, pack, ship, ship:undo, pack:undo, charge:undo, reserve:undo" が実行された
-    かつ 注文は "reserve, charge, pack, ship" を保持していない
+    かつ アクティビティ "Reserve, Charge, Pack, Ship, CancelShipment, Unpack, Refund, Unreserve" が実行された
+    かつ 注文は "Reserve, Charge, Pack, Ship" を保持していない
 
   シナリオ: 2つの書き方は同じ saga である
     前提 同じ注文 "both" を2つの書き方で動かす

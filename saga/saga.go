@@ -9,13 +9,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// undoSuffix distinguishes a compensation's ActivityID from its forward step's.
-// Temporal panics on a duplicate command ID within one workflow execution
-// ("[TMPRL1100] adding duplicate command"), so the two cannot share an ID. It
-// is also what makes a rollback legible in a history: "charge" and
-// "charge:undo" sit next to each other.
-const undoSuffix = ":undo"
-
 // Options configures a saga.
 type Options struct {
 	// ParallelCompensation fires every compensation at once instead of running
@@ -121,20 +114,6 @@ func newSaga(o Options) *Saga {
 	return &Saga{opts: o, names: map[string]struct{}{}}
 }
 
-// stepKey names a step within one workflow run. Step puts it on the activities
-// the step starts, so that a history reads the way the saga was written.
-//
-// It is also the shape an idempotency key wants, which is why
-// docs/activity-contract.md tells callers to build one like this. The library
-// does not build it for them: the key belongs in the request they send, and
-// nothing here would know where to put it.
-func stepKey(ctx workflow.Context, name string) string {
-	return workflow.GetInfo(ctx).WorkflowExecution.RunID + "/" + name
-}
-
-// Err reports the first error a step reported, if any. Once it is non-nil every
-// later step is a no-op, so a linear saga can skip the error check between
-// steps and let Run deal with the outcome.
 func (s *Saga) Err() error { return s.err }
 
 // Clear forgets the recorded error so that later steps run again, and so that

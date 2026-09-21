@@ -16,12 +16,12 @@
 
     前提 連鎖する注文 "chain" を "ship" で失敗させる
     ならば saga は "no carrier available" で失敗する
-    かつ ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-    かつ 補償 "charge" が受け取った前段の ID は "res-chain"
-    かつ 補償 "ship" が受け取った前段の ID は "chg-chain"
-    かつ 注文は "reserve, charge, ship" を保持していない
+    かつ アクティビティ "Reserve, Charge, Ship, CancelShipment, Refund, Unreserve" が実行された
+    かつ 補償 "Refund" が受け取った前段の ID は "res-chain"
+    かつ 補償 "CancelShipment" が受け取った前段の ID は "chg-chain"
+    かつ 注文は "Reserve, Charge, Ship" を保持していない
 
   シナリオ: 正常系では最後まで連鎖する
     前提 連鎖する注文 "ok"
     ならば saga は成功する
-    かつ ステップ "reserve, charge, ship" が実行された
+    かつ アクティビティ "Reserve, Charge, Ship" が実行された

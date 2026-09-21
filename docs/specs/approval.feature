@@ -15,18 +15,18 @@
     前提 承認待ちの注文 "approved"
     もし 承認を送る
     ならば saga は成功する
-    かつ ステップ "reserve, charge" が実行された
-    かつ 注文は "reserve, charge" を保持したままである
+    かつ アクティビティ "Reserve, Charge" が実行された
+    かつ 注文は "Reserve, Charge" を保持したままである
 
   シナリオ: 却下されれば予約は取り消される
     前提 承認待ちの注文 "denied"
     もし 却下を送る
     ならば saga は "ApprovalDenied" で失敗する
-    かつ ステップ "reserve, reserve:undo" が実行された
-    かつ 注文は "reserve" を保持していない
+    かつ アクティビティ "Reserve, Unreserve" が実行された
+    かつ 注文は "Reserve" を保持していない
 
   シナリオ: 誰も答えなければ時間切れで取り消される
     前提 承認を "1" 秒だけ待つ注文 "noreply"
     ならば saga は "ApprovalDenied" で失敗する
-    かつ ステップ "reserve, reserve:undo" が実行された
-    かつ 注文は "reserve" を保持していない
+    かつ アクティビティ "Reserve, Unreserve" が実行された
+    かつ 注文は "Reserve" を保持していない

@@ -4,7 +4,7 @@ package specsteps
 //
 // The only link is the step sentence. godog takes a line like
 //
-//	もし "charge" が実行されたら saga をキャンセルする
+//	もし "Charge" が実行されたら saga をキャンセルする
 //
 // strips the Gherkin keyword, and looks for the step registered with a regular
 // expression that matches the rest:
@@ -102,17 +102,26 @@ func (s *scenarioState) outcome() (sagaErr error, err error) {
 // is Temporal's record of what actually happened, and an activity cannot
 // flatter itself in it.
 type sagaHistory struct {
-	// scheduled is the step names in the order they were scheduled. A
-	// compensation appears as "<step>:undo".
+	// scheduled is the activities in the order they were scheduled, by the name
+	// of the function that ran -- "Reserve", "Unreserve" and so on. The saga
+	// library does not name activities, so this is what Temporal records.
 	scheduled []string
-	// completed reports, per step name, that its activity finished without an
-	// error.
+	// completed reports, per activity, that it finished without an error.
 	completed map[string]bool
-	// input is what each step's activity was handed.
+	// input is what each activity was handed.
 	input map[string]*commonpb.Payloads
 	// children is the ids of the child workflows the saga started, scoped to
 	// the run like the step names are.
 	children []string
+}
+
+// undoOf pairs an activity with the one that undoes it. The examples all call
+// the same activity package, so one table covers every specification.
+var undoOf = map[string]string{
+	"Reserve": "Unreserve",
+	"Charge":  "Refund",
+	"Ship":    "CancelShipment",
+	"Pack":    "Unpack",
 }
 
 // history walks the saga's history once and pulls out all of it.
@@ -149,15 +158,11 @@ func (s *scenarioState) historyOf(workflowID, runID, prefix string) (*sagaHistor
 		switch event.GetEventType() {
 		case enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
 			attr := event.GetActivityTaskScheduledEventAttributes()
-			id := attr.GetActivityId()
-			if !strings.HasPrefix(id, prefix) {
-				return nil, fmt.Errorf("activity id %q is not scoped to the run", id)
-			}
-			step := strings.TrimPrefix(id, prefix)
+			name := attr.GetActivityType().GetName()
 
-			h.scheduled = append(h.scheduled, step)
-			h.input[step] = attr.GetInput()
-			byEventID[event.GetEventId()] = step
+			h.scheduled = append(h.scheduled, name)
+			h.input[name] = attr.GetInput()
+			byEventID[event.GetEventId()] = name
 
 		case enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
 			step, ok := byEventID[event.GetActivityTaskCompletedEventAttributes().GetScheduledEventId()]
@@ -176,21 +181,18 @@ func (s *scenarioState) historyOf(workflowID, runID, prefix string) (*sagaHistor
 	return h, nil
 }
 
-// standing reports whether the work of a step is still done: its activity
-// completed and its compensation did not take it back. This is what replaced
-// asking the activities to remember -- a step is undone when its "<step>:undo"
-// ran, which is a fact about the saga rather than about a fake.
-func (h *sagaHistory) standing(step string) bool {
-	return h.completed[step] && !h.completed[step+":undo"]
+// standing reports whether the work an activity did is still done: it completed
+// and the activity that undoes it did not.
+func (h *sagaHistory) standing(name string) bool {
+	return h.completed[name] && !h.completed[undoOf[name]]
 }
 
-// upstream decodes the upstream id the named step's compensation was handed.
-// The compensation gets the same input its forward step got, so the id is in
-// the payload the history recorded.
-func (h *sagaHistory) upstream(step string) (string, error) {
-	payloads, ok := h.input[step+":undo"]
+// upstream decodes the upstream id a compensation was handed. It gets the same
+// input its forward half got, so the id is in the payload the history recorded.
+func (h *sagaHistory) upstream(name string) (string, error) {
+	payloads, ok := h.input[name]
 	if !ok {
-		return "", fmt.Errorf("補償 %q は実行されていません", step)
+		return "", fmt.Errorf("補償 %q は実行されていません", name)
 	}
 
 	// Enough of ChargeReq and ShipReq to read either.
@@ -199,16 +201,16 @@ func (h *sagaHistory) upstream(step string) (string, error) {
 		Charge      string `json:"charge"`
 	}
 	if err := converter.GetDefaultDataConverter().FromPayloads(payloads, &req); err != nil {
-		return "", fmt.Errorf("補償 %q の入力を読めません: %w", step, err)
+		return "", fmt.Errorf("補償 %q の入力を読めません: %w", name, err)
 	}
 
-	switch step {
-	case "charge":
+	switch name {
+	case "Refund":
 		return req.Reservation, nil
-	case "ship":
+	case "CancelShipment":
 		return req.Charge, nil
 	default:
-		return "", fmt.Errorf("ステップ %q に前段の ID はありません", step)
+		return "", fmt.Errorf("補償 %q に前段の ID はありません", name)
 	}
 }
 
@@ -361,7 +363,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 
 	// --- what the history says -----------------------------------------------
 
-	sc.Step(`^ステップ "([^"]*)" が実行された$`, func(ctx context.Context, steps string) error {
+	sc.Step(`^アクティビティ "([^"]*)" が実行された$`, func(ctx context.Context, steps string) error {
 		s := stateOf(ctx)
 		if _, err := s.outcome(); err != nil {
 			return err
@@ -372,7 +374,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 		if got, want := strings.Join(h.scheduled, ", "), steps; got != want {
-			return fmt.Errorf("steps in the history:\n  got:  %s\n  want: %s", got, want)
+			return fmt.Errorf("activities in the history:\n  got:  %s\n  want: %s", got, want)
 		}
 		return nil
 	})
