@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Temporal の登場人物 — temporal-workflow-kit docs</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:#fbfbfa; --surface:#fff; --surface-2:#f4f4f2;
+    --ink:#1c1c1a; --ink-2:#57564f; --ink-3:#8a8880; --line:#e2e1dc;
+    --fwd:#2f5fa8; --fwd-bg:#eef2f9; --undo:#b4342a; --undo-bg:#fdf1ef;
+    --ok:#2f6e4f; --ok-bg:#eef5f0; --wait:#8a6a12; --wait-bg:#fbf5e6;
+    --child:#6b3fa0; --child-bg:#f3eefa;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16161a; --surface:#1e1e23; --surface-2:#26262c;
+      --ink:#ecEae6; --ink-2:#b3b1ab; --ink-3:#807e78; --line:#33333a;
+      --fwd:#8fb3ea; --fwd-bg:#1d2331; --undo:#f2837a; --undo-bg:#2b1d1c;
+      --ok:#7fc7a0; --ok-bg:#1b2621; --wait:#d8b25c; --wait-bg:#2a2418;
+      --child:#b79ae0; --child-bg:#241d2e; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); line-height:1.75; font-size:15px; }
+  .wrap { max-width:900px; margin:0 auto; padding:40px 20px 80px; }
+  nav { font-size:12.5px; color:var(--ink-3); margin-bottom:26px; font-family:var(--mono); }
+  nav a { color:var(--ink-3); text-decoration:none; padding:2px 6px; border-radius:4px; }
+  nav a:hover { background:var(--surface-2); color:var(--ink); }
+  nav a.here { background:var(--fwd-bg); color:var(--fwd); }
+  h1 { font-size:24px; margin:0 0 6px; letter-spacing:-.01em; }
+  h1 .path { display:block; font-family:var(--mono); font-size:13px; color:var(--ink-3); font-weight:400; margin-top:4px; }
+  h2 { font-size:14px; margin:44px 0 8px; color:var(--ink-3); letter-spacing:.04em; text-transform:uppercase; }
+  h2 .n { display:inline-block; min-width:22px; height:22px; line-height:22px; text-align:center; border-radius:11px; background:var(--surface-2); color:var(--ink-2); font-family:var(--mono); font-size:12px; margin-right:8px; }
+  p { margin:10px 0; color:var(--ink-2); }
+  p strong { color:var(--ink); font-weight:600; }
+  code { font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:1px 5px; border-radius:4px; }
+  a { color:var(--fwd); }
+  .strip { border:1px solid var(--line); border-radius:10px; background:var(--surface); padding:14px 12px; margin:14px 0; overflow-x:auto; }
+  .repo { background:var(--surface-2); border-left:3px solid var(--ok); border-radius:0 8px 8px 0; padding:9px 14px; margin:10px 0 0; font-size:13px; color:var(--ink-2); }
+  .repo b { color:var(--ink); font-weight:600; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 18px; margin:14px 0 0; font-size:12.5px; color:var(--ink-3); }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .sw { width:12px; height:12px; border-radius:3px; border:1px solid; }
+  footer { margin-top:56px; padding-top:20px; border-top:1px solid var(--line); color:var(--ink-3); font-size:12.5px; }
+  footer ol { padding-left:22px; margin:8px 0; }
+  footer li { margin:4px 0; word-break:break-all; }
+
+  /* 図は inline SVG。viewBox で縮むが、文字が読めなくなる幅より下では .strip 側が横に流す。 */
+  svg.d { display:block; width:100%; height:auto; min-width:600px; font-family:var(--sans); font-size:13px; }
+  .d text { fill:var(--ink-2); }
+  .d .t { fill:var(--ink); font-weight:600; }
+  .d .m { font-family:var(--mono); font-size:12px; }
+  .d .s { fill:var(--ink-3); font-size:11.5px; }
+  .d .xs { fill:var(--ink-3); font-size:10.5px; font-family:var(--mono); }
+  .d .box { fill:var(--surface); stroke:var(--line); }
+  .d .box2 { fill:var(--surface-2); stroke:var(--line); }
+  .d .wf { fill:var(--fwd-bg); stroke:var(--fwd); }
+  .d .ac { fill:var(--ok-bg); stroke:var(--ok); }
+  .d .tq { fill:var(--wait-bg); stroke:var(--wait); }
+  .d .sv { fill:var(--child-bg); stroke:var(--child); }
+  .d .bad { fill:var(--undo-bg); stroke:var(--undo); }
+  .d .c-wf { fill:var(--fwd); } .d .c-ac { fill:var(--ok); } .d .c-tq { fill:var(--wait); }
+  .d .c-sv { fill:var(--child); } .d .c-bad { fill:var(--undo); }
+  .d .ln { stroke:var(--ink-3); fill:none; stroke-width:1.4; }
+  .d .ln-wf { stroke:var(--fwd); fill:none; stroke-width:1.4; }
+  .d .ln-ac { stroke:var(--ok); fill:none; stroke-width:1.4; }
+  .d .ln-tq { stroke:var(--wait); fill:none; stroke-width:1.4; }
+  .d .ln-sv { stroke:var(--child); fill:none; stroke-width:1.4; }
+  .d .ln-bad { stroke:var(--undo); fill:none; stroke-width:1.4; }
+  .d .dash { stroke-dasharray:5 4; }
+  .d .dot { stroke-dasharray:2 3; }
+  .d .band { stroke:none; opacity:.55; }
+  @media (max-width:680px){ .wrap{padding:28px 14px 60px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- 矢印の先端。全部の図から id で参照する -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink-3)"/></marker>
+    <marker id="a-wf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--fwd)"/></marker>
+    <marker id="a-ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ok)"/></marker>
+    <marker id="a-tq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--wait)"/></marker>
+    <marker id="a-sv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--child)"/></marker>
+    <marker id="a-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--undo)"/></marker>
+  </defs>
+</svg>
+
+<nav><a href="../README.md">README</a> · <a class="here" href="temporal-concepts.html">temporal-concepts</a> · <a href="design.md">design.md</a> · <a href="activity-contract.md">activity-contract.md</a></nav>
+
+<h1>Temporal の登場人物<span class="path">docs/temporal-concepts.html</span></h1>
+<p>Temporal を初めて使う Go エンジニア向けに、<code>docs/design.md</code> を読む前の地図として7枚の図を並べました。文は最小限で、図に描いた事実は末尾の出典（Temporal 公式ドキュメント）で確認しています。各図の下の緑の欄が、その概念がこのリポジトリのどこに出てくるかです。</p>
+
+<div class="legend">
+  <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> Workflow / Client 側</span>
+  <span><i class="sw" style="background:var(--ok-bg);border-color:var(--ok)"></i> Activity / 結果</span>
+  <span><i class="sw" style="background:var(--wait-bg);border-color:var(--wait)"></i> Task Queue / 待ち</span>
+  <span><i class="sw" style="background:var(--child-bg);border-color:var(--child)"></i> Temporal Server / Run / Child</span>
+  <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 失敗 / 禁止</span>
+</div>
+
+<!-- ============================================================ 1 -->
+<h2><span class="n">1</span>全体像</h2>
+<p>Temporal Server はあなたのコードを一切実行しません。Server は Task Queue に Task を置き、Event History を永続化するだけで、<strong>Worker が Task を取りに行き</strong>、Workflow と Activity を自分のプロセスで走らせて結果を返します。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 420" role="img" aria-label="Client、Temporal Server、Worker の関係">
+  <!-- Client -->
+  <rect x="16" y="160" width="100" height="72" rx="8" class="box"/>
+  <text x="66" y="190" text-anchor="middle" class="t">Client</text>
+  <text x="66" y="209" text-anchor="middle" class="s">アプリ / CLI</text>
+
+  <!-- Server -->
+  <rect x="186" y="24" width="340" height="380" rx="10" class="box" stroke="var(--child)"/>
+  <text x="198" y="46" class="t c-sv">Temporal Server</text>
+  <text x="330" y="46" class="s">あなたのコードは走らない</text>
+
+  <rect x="200" y="60" width="312" height="222" rx="8" class="box dash" stroke="var(--ink-3)"/>
+  <text x="210" y="78" class="s">Namespace: default</text>
+
+  <rect x="214" y="90" width="284" height="142" rx="6" class="tq"/>
+  <text x="224" y="108" class="m c-tq">Task Queue  saga-integration</text>
+  <rect x="224" y="116" width="264" height="28" rx="4" class="wf"/>
+  <text x="232" y="135" class="xs c-wf">Workflow Task Queue</text>
+  <rect x="420" y="124" width="12" height="12" rx="2" class="c-wf"/><rect x="438" y="124" width="12" height="12" rx="2" class="c-wf"/><rect x="456" y="124" width="12" height="12" rx="2" class="c-wf"/>
+  <text x="356" y="172" text-anchor="middle" class="s">1つの名前に Workflow 用と Activity 用の列がある</text>
+  <rect x="224" y="194" width="264" height="28" rx="4" class="ac"/>
+  <text x="232" y="213" class="xs c-ac">Activity Task Queue</text>
+  <rect x="420" y="202" width="12" height="12" rx="2" class="c-ac"/><rect x="438" y="202" width="12" height="12" rx="2" class="c-ac"/>
+
+  <rect x="214" y="242" width="284" height="30" rx="6" class="box dash"/>
+  <text x="224" y="261" class="s">Task Queue  payments（別の Worker 群が poll する）</text>
+
+  <rect x="200" y="294" width="312" height="98" rx="8" class="box"/>
+  <text x="210" y="312" class="t">Event History</text>
+  <text x="306" y="312" class="s">追記のみ。Server が永続化する</text>
+  <rect x="210" y="322" width="156" height="18" rx="3" class="wf"/><text x="216" y="335" class="xs c-wf">WorkflowExecutionStarted</text>
+  <rect x="372" y="322" width="132" height="18" rx="3" class="box2"/><text x="378" y="335" class="xs">WorkflowTaskCompleted</text>
+  <rect x="210" y="346" width="156" height="18" rx="3" class="ac"/><text x="216" y="359" class="xs c-ac">ActivityTaskScheduled</text>
+  <rect x="372" y="346" width="132" height="18" rx="3" class="ac"/><text x="378" y="359" class="xs c-ac">ActivityTaskCompleted</text>
+  <text x="210" y="384" class="s">… 図5で中身を見る</text>
+
+  <!-- Worker -->
+  <rect x="578" y="24" width="206" height="380" rx="10" class="box" stroke="var(--ink)"/>
+  <text x="590" y="46" class="t">Worker</text>
+  <text x="644" y="46" class="s">あなたのプロセス</text>
+  <text x="590" y="64" class="s">Task Queue を1つ poll する</text>
+
+  <rect x="592" y="92" width="178" height="76" rx="8" class="wf"/>
+  <text x="681" y="116" text-anchor="middle" class="t c-wf">Workflow 関数</text>
+  <text x="681" y="134" text-anchor="middle" class="m">OrderSaga</text>
+  <text x="681" y="152" text-anchor="middle" class="s">決定的なコード（図3）</text>
+
+  <rect x="592" y="186" width="178" height="76" rx="8" class="ac"/>
+  <text x="681" y="210" text-anchor="middle" class="t c-ac">Activity 関数</text>
+  <text x="681" y="228" text-anchor="middle" class="m">Reserve / Charge / Ship</text>
+  <text x="681" y="246" text-anchor="middle" class="s">外の世界に触る</text>
+
+  <text x="600" y="300" class="s">Workflow Task を終えたら Commands、</text>
+  <text x="600" y="316" class="s">Activity を終えたら結果を返す</text>
+
+  <!-- Client <-> Server -->
+  <text x="151" y="140" text-anchor="middle" class="s">開始 / Signal /</text>
+  <text x="151" y="154" text-anchor="middle" class="s">Query / Update</text>
+  <path d="M116 186 L184 186" class="ln" marker-end="url(#a-ink)"/>
+  <path d="M184 206 L118 206" class="ln dash" marker-end="url(#a-ink)"/>
+  <text x="151" y="248" text-anchor="middle" class="s">結果を待てる</text>
+
+  <!-- Worker polls -->
+  <path d="M592 122 L490 122" class="ln-wf" marker-end="url(#a-wf)"/>
+  <text x="540" y="114" text-anchor="middle" class="s c-wf">poll（取りに行く）</text>
+  <path d="M488 140 L590 140" class="ln-wf dash" marker-end="url(#a-wf)"/>
+  <text x="540" y="156" text-anchor="middle" class="s">Workflow Task + History</text>
+
+  <path d="M592 204 L490 204" class="ln-ac" marker-end="url(#a-ac)"/>
+  <text x="540" y="196" text-anchor="middle" class="s c-ac">poll（取りに行く）</text>
+  <path d="M488 218 L590 218" class="ln-ac dash" marker-end="url(#a-ac)"/>
+  <text x="540" y="236" text-anchor="middle" class="s">Activity Task（入力）</text>
+
+  <!-- Worker -> History -->
+  <path d="M592 348 L514 348" class="ln" marker-end="url(#a-ink)"/>
+  <text x="553" y="340" text-anchor="middle" class="s">Commands・結果</text>
+  <text x="553" y="364" text-anchor="middle" class="s">→ Event として追記</text>
+</svg>
+</div>
+<p>矢印の向きに注意してください。Worker → Server の実線は Worker が同期 RPC で <strong>long poll</strong> している線で、Server から Worker へ押し込む経路はありません。だから Worker は受信ポートを開けず、DNS 登録もいりません。</p>
+<div class="repo">このリポジトリでは: 仕様スイートが <b>プロセス内に dev server と Worker を両方立てて</b>、Client として saga を開始する — <code>specsteps/suite_test.go</code>。Worker が登録する Workflow と Activity は <code>example/order/</code>。</div>
+
+<!-- ============================================================ 2 -->
+<h2><span class="n">2</span>Task Queue と Worker の対応</h2>
+<p>Task Queue は登録不要で、名前を指定した瞬間に作られる軽い列です。実質的には<strong>「その名前を poll する Worker のグループ名」</strong>で、どの Task がどの Worker に渡るかは決まっていません。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 600" role="img" aria-label="Task Queue と Worker の3つの形">
+  <!-- A -->
+  <text x="16" y="18" class="t">A. 1つの Worker が Workflow と Activity の両方を持つ</text>
+  <rect x="16" y="40" width="200" height="70" rx="8" class="tq"/>
+  <text x="116" y="66" text-anchor="middle" class="s">Task Queue</text>
+  <text x="116" y="88" text-anchor="middle" class="m c-tq">saga-integration</text>
+  <rect x="340" y="30" width="444" height="100" rx="8" class="box" stroke="var(--ink)"/>
+  <text x="352" y="50" class="t">Worker A</text>
+  <rect x="356" y="62" width="190" height="52" rx="6" class="wf"/>
+  <text x="451" y="84" text-anchor="middle" class="s c-wf">Workflow</text>
+  <text x="451" y="102" text-anchor="middle" class="m">OrderSaga</text>
+  <rect x="566" y="62" width="204" height="52" rx="6" class="ac"/>
+  <text x="668" y="84" text-anchor="middle" class="s c-ac">Activity</text>
+  <text x="668" y="102" text-anchor="middle" class="m">Reserve, Charge, Ship</text>
+  <path d="M340 75 L218 75" class="ln-tq" marker-end="url(#a-tq)"/>
+  <text x="278" y="68" text-anchor="middle" class="s">poll</text>
+
+  <!-- B -->
+  <text x="16" y="176" class="t">B. 複数の Worker が1つの Queue を分担する</text>
+  <rect x="16" y="220" width="200" height="70" rx="8" class="tq"/>
+  <text x="116" y="246" text-anchor="middle" class="s">Task Queue</text>
+  <text x="116" y="268" text-anchor="middle" class="m c-tq">saga-integration</text>
+  <g>
+    <rect x="340" y="196" width="444" height="40" rx="8" class="box" stroke="var(--ink)"/>
+    <text x="352" y="221" class="t">Worker A</text>
+    <rect x="440" y="204" width="120" height="24" rx="4" class="wf"/><text x="500" y="221" text-anchor="middle" class="xs c-wf">OrderSaga</text>
+    <rect x="570" y="204" width="200" height="24" rx="4" class="ac"/><text x="670" y="221" text-anchor="middle" class="xs c-ac">Reserve, Charge, Ship</text>
+    <path d="M340 216 L218 246" class="ln-tq" marker-end="url(#a-tq)"/>
+  </g>
+  <g>
+    <rect x="340" y="246" width="444" height="40" rx="8" class="box" stroke="var(--ink)"/>
+    <text x="352" y="271" class="t">Worker B</text>
+    <rect x="440" y="254" width="120" height="24" rx="4" class="wf"/><text x="500" y="271" text-anchor="middle" class="xs c-wf">OrderSaga</text>
+    <rect x="570" y="254" width="200" height="24" rx="4" class="ac"/><text x="670" y="271" text-anchor="middle" class="xs c-ac">Reserve, Charge, Ship</text>
+    <path d="M340 266 L218 258" class="ln-tq" marker-end="url(#a-tq)"/>
+  </g>
+  <g>
+    <rect x="340" y="296" width="444" height="40" rx="8" class="box" stroke="var(--ink)"/>
+    <text x="352" y="321" class="t">Worker C</text>
+    <rect x="440" y="304" width="120" height="24" rx="4" class="wf"/><text x="500" y="321" text-anchor="middle" class="xs c-wf">OrderSaga</text>
+    <rect x="570" y="304" width="200" height="24" rx="4" class="ac"/><text x="670" y="321" text-anchor="middle" class="xs c-ac">Reserve, Charge, Ship</text>
+    <path d="M340 316 L218 270" class="ln-tq" marker-end="url(#a-tq)"/>
+  </g>
+  <text x="340" y="358" class="s">同じ Queue を聞く Worker は、その Queue に来る Workflow と Activity を全部登録しておく。</text>
+  <text x="340" y="374" class="s">どの Task をどの Worker が取るかは決まっていない（負荷分散と冗長化はこれで得る）。</text>
+
+  <!-- C -->
+  <text x="16" y="418" class="t">C. Queue ごとに別チームの Worker を立てる（Activity の Task Routing）</text>
+  <rect x="16" y="440" width="230" height="130" rx="8" class="wf"/>
+  <text x="28" y="460" class="s c-wf">OrderSaga のコード</text>
+  <text x="28" y="484" class="m">ExecuteActivity(ctx, Reserve)</text>
+  <text x="28" y="500" class="m c-tq">  TaskQueue: "inventory"</text>
+  <text x="28" y="530" class="m">ExecuteActivity(ctx, Charge)</text>
+  <text x="28" y="546" class="m c-tq">  TaskQueue: "payments"</text>
+
+  <rect x="300" y="440" width="170" height="34" rx="6" class="tq"/><text x="385" y="462" text-anchor="middle" class="m c-tq">orders</text>
+  <rect x="300" y="488" width="170" height="34" rx="6" class="tq"/><text x="385" y="510" text-anchor="middle" class="m c-tq">inventory</text>
+  <rect x="300" y="536" width="170" height="34" rx="6" class="tq"/><text x="385" y="558" text-anchor="middle" class="m c-tq">payments</text>
+
+  <path d="M246 457 L298 457" class="ln-wf dash" marker-end="url(#a-wf)"/>
+  <text x="272" y="450" text-anchor="middle" class="xs">Workflow Task</text>
+  <path d="M246 492 L298 505" class="ln-ac" marker-end="url(#a-ac)"/>
+  <path d="M246 538 L298 553" class="ln-ac" marker-end="url(#a-ac)"/>
+
+  <rect x="540" y="440" width="244" height="34" rx="6" class="box" stroke="var(--ink)"/>
+  <text x="552" y="462" class="t">注文チームの Worker</text>
+  <rect x="690" y="447" width="84" height="20" rx="4" class="wf"/><text x="732" y="461" text-anchor="middle" class="xs c-wf">OrderSaga</text>
+  <rect x="540" y="488" width="244" height="34" rx="6" class="box" stroke="var(--ink)"/>
+  <text x="552" y="510" class="t">在庫チームの Worker</text>
+  <rect x="690" y="495" width="84" height="20" rx="4" class="ac"/><text x="732" y="509" text-anchor="middle" class="xs c-ac">Reserve</text>
+  <rect x="540" y="536" width="244" height="34" rx="6" class="box" stroke="var(--ink)"/>
+  <text x="552" y="558" class="t">決済チームの Worker</text>
+  <rect x="690" y="543" width="84" height="20" rx="4" class="ac"/><text x="732" y="557" text-anchor="middle" class="xs c-ac">Charge</text>
+
+  <path d="M540 457 L472 457" class="ln-tq" marker-end="url(#a-tq)"/>
+  <path d="M540 505 L472 505" class="ln-tq" marker-end="url(#a-tq)"/>
+  <path d="M540 553 L472 553" class="ln-tq" marker-end="url(#a-tq)"/>
+  <text x="505" y="432" text-anchor="middle" class="s">poll</text>
+
+  <text x="16" y="592" class="s">Activity ごとに Task Queue 名を指定できる。省略すると Workflow と同じ Queue を継承する（Child Workflow も同じ規則）。</text>
+</svg>
+</div>
+<p>C の形が、決済チームと在庫チームがそれぞれ自分のコードと資格情報だけを持つ Worker を運用するときの配線です。Workflow は注文チームの Worker で走り、Activity Task だけが他チームの Queue に置かれます。</p>
+<div class="repo">このリポジトリでは: 今は全ステップが Workflow と同じ Queue で動く — <code>example/order/workflow.go</code> の <code>TaskQueue</code>。<b>ステップごとに Task Queue を変えられるようにするのが次の変更</b>で、C の形がその配線になる。</div>
+
+<!-- ============================================================ 3 -->
+<h2><span class="n">3</span>Workflow と Activity の境界</h2>
+<p>Workflow 関数は<strong>同じ入力なら同じ順序で同じ Temporal API を呼ぶ</strong>必要があります（決定性）。外の世界に触ること、時刻や乱数のように実行ごとに変わることは、境界の右側か <code>workflow</code> パッケージの代替に寄せます。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 400" role="img" aria-label="Workflow 側で禁止されるものと代替、Activity 側でできること">
+  <rect x="16" y="40" width="384" height="336" rx="10" class="wf"/>
+  <text x="32" y="66" class="t c-wf">Workflow 関数</text>
+  <text x="140" y="66" class="s">決定的でなければならない</text>
+
+  <rect x="464" y="40" width="320" height="336" rx="10" class="ac"/>
+  <text x="480" y="66" class="t c-ac">Activity 関数</text>
+  <text x="586" y="66" class="s">外の世界に触ってよい</text>
+
+  <path d="M432 24 L432 388" class="ln-bad dash" stroke-width="2"/>
+  <text x="432" y="16" text-anchor="middle" class="s c-bad">境界</text>
+
+  <!-- pairs -->
+  <text x="32" y="98" class="s">Go でそのまま書くと壊れる</text>
+  <text x="190" y="98" class="s">代わりに使う</text>
+
+  <text x="32" y="126" class="m c-bad">✕ time.Now()</text>
+  <text x="190" y="126" class="m c-wf">✓ workflow.Now(ctx)</text>
+  <text x="32" y="156" class="m c-bad">✕ time.Sleep()</text>
+  <text x="190" y="156" class="m c-wf">✓ workflow.Sleep(ctx, d)</text>
+  <text x="32" y="186" class="m c-bad">✕ rand / uuid.New()</text>
+  <text x="190" y="186" class="m c-wf">✓ workflow.SideEffect(ctx, f)</text>
+  <text x="32" y="216" class="m c-bad">✕ go f()</text>
+  <text x="190" y="216" class="m c-wf">✓ workflow.Go(ctx, f)</text>
+  <text x="32" y="246" class="m c-bad">✕ chan / select</text>
+  <text x="190" y="246" class="m c-wf">✓ workflow.Channel / Selector</text>
+  <text x="32" y="276" class="m c-bad">✕ for k := range m</text>
+  <text x="190" y="276" class="m c-wf">✓ キーをソートして回す</text>
+  <text x="32" y="306" class="m c-bad">✕ HTTP / DB / I/O</text>
+  <text x="190" y="306" class="m c-wf">✓ Activity に出す →</text>
+
+  <text x="32" y="346" class="s">SideEffect の結果は History に記録され、</text>
+  <text x="32" y="362" class="s">replay では記録値が返る（図5）</text>
+
+  <!-- right -->
+  <text x="480" y="104" class="m c-ac">普通の Go</text>
+  <text x="480" y="122" class="s">HTTP、DB、外部 API、ファイル、goroutine、time.Now</text>
+  <text x="480" y="154" class="m c-ac">失敗したら Retry Policy で再実行される</text>
+  <text x="480" y="172" class="s">既定は無制限（1s から 2 倍ずつ間隔を広げる）</text>
+  <text x="480" y="204" class="m c-ac">→ 冪等に書く</text>
+  <text x="480" y="222" class="s">同じ入力で2回呼ばれても壊れないように</text>
+  <text x="480" y="254" class="m c-ac">長いものは Heartbeat で生存報告</text>
+  <text x="480" y="272" class="s">Heartbeat しない Activity はキャンセルを受け取れない</text>
+
+  <!-- crossing -->
+  <path d="M400 312 L462 312" class="ln-ac" marker-end="url(#a-ac)"/>
+  <text x="432" y="302" text-anchor="middle" class="xs">Command</text>
+  <path d="M462 340 L402 340" class="ln-ac dash" marker-end="url(#a-ac)"/>
+  <text x="432" y="358" text-anchor="middle" class="xs">結果</text>
+</svg>
+</div>
+<div class="repo">このリポジトリでは: 判断は Workflow 側の <code>saga.Func</code> に、外部呼び出しは <code>saga.Activity</code> に置く — <code>saga/step.go</code>。Activity 側に求める冪等性の約束は <code>docs/activity-contract.md</code>。</div>
+
+<!-- ============================================================ 4 -->
+<h2><span class="n">4</span>1つの Activity の一生</h2>
+<p>1回の <code>ExecuteActivity</code> は1つの <strong>Activity Execution</strong> で、その中で <strong>Activity Task</strong>（＝1 attempt）が retry の回数だけ繰り返されます。4つの timeout のうち3つは attempt ごと、ScheduleToClose だけが全体を測ります。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 580" role="img" aria-label="Activity の状態遷移と、時間軸上の4つの timeout">
+  <!-- state machine -->
+  <rect x="16" y="58" width="130" height="40" rx="8" class="tq"/>
+  <text x="81" y="83" text-anchor="middle" class="t c-tq">Scheduled</text>
+  <path d="M146 78 L208 78" class="ln" marker-end="url(#a-ink)"/>
+  <text x="177" y="52" text-anchor="middle" class="xs">Worker が取る</text>
+  <rect x="210" y="58" width="130" height="40" rx="8" class="wf"/>
+  <text x="275" y="83" text-anchor="middle" class="t c-wf">Started</text>
+
+  <path d="M340 70 L418 31" class="ln" marker-end="url(#a-ink)"/>
+  <path d="M340 76 L418 69" class="ln" marker-end="url(#a-ink)"/>
+  <path d="M340 82 L418 107" class="ln" marker-end="url(#a-ink)"/>
+  <path d="M340 88 L418 145" class="ln" marker-end="url(#a-ink)"/>
+  <rect x="420" y="16" width="130" height="30" rx="6" class="ac"/><text x="485" y="36" text-anchor="middle" class="m c-ac">Completed</text>
+  <rect x="420" y="54" width="130" height="30" rx="6" class="box2"/><text x="485" y="74" text-anchor="middle" class="m">Canceled</text>
+  <rect x="420" y="92" width="130" height="30" rx="6" class="bad"/><text x="485" y="112" text-anchor="middle" class="m c-bad">Failed</text>
+  <rect x="420" y="130" width="130" height="30" rx="6" class="bad"/><text x="485" y="150" text-anchor="middle" class="m c-bad">TimedOut</text>
+  <text x="596" y="36" class="s">結果を History へ</text>
+  <text x="596" y="74" class="s">取り消し要求に応じた</text>
+  <text x="596" y="112" class="s">エラーを返した</text>
+  <text x="596" y="150" class="s">下の timeout を超えた</text>
+
+  <path d="M550 107 L572 107 L572 184 L81 184 L81 100" class="ln-bad" marker-end="url(#a-bad)"/>
+  <path d="M550 145 L572 145" class="ln-bad"/>
+  <text x="330" y="200" text-anchor="middle" class="s c-bad">Retry Policy が許せば、Server が次の attempt を Schedule し直す</text>
+  <text x="330" y="216" text-anchor="middle" class="xs">（ScheduleToStart の超過だけは retry の対象にならない）</text>
+
+  <!-- timeline -->
+  <!-- ScheduleToClose -->
+  <path d="M60 262 L60 274 M60 268 L700 268 M700 262 L700 274" class="ln-sv"/>
+  <text x="60" y="258" class="s c-sv">ScheduleToClose — Activity Execution 全体。全 attempt をまたぐ。retry の総時間の上限になる</text>
+  <!-- ScheduleToStart -->
+  <path d="M60 296 L60 308 M60 302 L150 302 M150 296 L150 308" class="ln-tq"/>
+  <path d="M400 296 L400 308 M400 302 L460 302 M460 296 L460 308" class="ln-tq"/>
+  <text x="60" y="292" class="s c-tq">ScheduleToStart — 列に置かれてから Worker が取るまで。attempt ごと。既定 ∞</text>
+  <!-- StartToClose -->
+  <path d="M150 330 L150 342 M150 336 L330 336 M330 330 L330 342" class="ln-wf"/>
+  <path d="M460 330 L460 342 M460 336 L700 336 M700 330 L700 342" class="ln-wf"/>
+  <text x="150" y="326" class="s c-wf">StartToClose — 1 attempt の実行時間。超えると TimedOut → retry</text>
+  <!-- Heartbeat -->
+  <circle cx="480" cy="370" r="3" class="c-ac"/><circle cx="520" cy="370" r="3" class="c-ac"/><circle cx="560" cy="370" r="3" class="c-ac"/><circle cx="600" cy="370" r="3" class="c-ac"/><circle cx="640" cy="370" r="3" class="c-ac"/><circle cx="680" cy="370" r="3" class="c-ac"/>
+  <path d="M520 358 L520 364 M520 361 L560 361 M560 358 L560 364" class="ln-ac"/>
+  <text x="460" y="354" text-anchor="end" class="s c-ac">Heartbeat — 連続する heartbeat の最大間隔。attempt ごと</text>
+
+  <!-- bars -->
+  <rect x="60" y="388" width="90" height="22" class="tq"/>
+  <rect x="150" y="388" width="180" height="22" class="wf"/>
+  <rect x="330" y="388" width="70" height="22" class="box2"/>
+  <rect x="400" y="388" width="60" height="22" class="tq"/>
+  <rect x="460" y="388" width="240" height="22" class="ac"/>
+  <text x="105" y="403" text-anchor="middle" class="xs">列で待つ</text>
+  <text x="240" y="403" text-anchor="middle" class="xs">実行中</text>
+  <text x="365" y="403" text-anchor="middle" class="xs">backoff</text>
+  <text x="430" y="403" text-anchor="middle" class="xs">待つ</text>
+  <text x="580" y="403" text-anchor="middle" class="xs">実行中</text>
+
+  <path d="M40 410 L780 410" class="ln" marker-end="url(#a-ink)"/>
+  <path d="M60 410 L60 418 M150 410 L150 418 M330 410 L330 418 M400 410 L400 418 M460 410 L460 418 M700 410 L700 418" class="ln"/>
+  <text x="60" y="432" text-anchor="middle" class="xs">Scheduled</text>
+  <text x="150" y="432" text-anchor="middle" class="xs">Started</text>
+  <text x="330" y="432" text-anchor="middle" class="xs c-bad">TimedOut</text>
+  <text x="400" y="432" text-anchor="middle" class="xs">Scheduled</text>
+  <text x="460" y="432" text-anchor="middle" class="xs">Started</text>
+  <text x="700" y="432" text-anchor="middle" class="xs c-ac">Completed</text>
+  <text x="195" y="450" text-anchor="middle" class="s">attempt 1</text>
+  <text x="580" y="450" text-anchor="middle" class="s">attempt 2</text>
+  <text x="765" y="432" text-anchor="middle" class="xs">時間</text>
+
+  <!-- history -->
+  <rect x="16" y="470" width="768" height="98" rx="8" class="box"/>
+  <text x="28" y="490" class="t">この Activity Execution が History に残す Event</text>
+  <rect x="28" y="500" width="150" height="18" rx="3" class="ac"/><text x="34" y="513" class="xs c-ac">ActivityTaskScheduled</text>
+  <rect x="186" y="500" width="196" height="18" rx="3" class="ac"/><text x="192" y="513" class="xs c-ac">ActivityTaskStarted  attempt=2</text>
+  <rect x="390" y="500" width="150" height="18" rx="3" class="ac"/><text x="396" y="513" class="xs c-ac">ActivityTaskCompleted</text>
+  <text x="28" y="540" class="s">Scheduled は最初の1回だけ。attempt 1 の TimedOut は Event にならない。</text>
+  <text x="28" y="556" class="s">Started は終端 Event と同時に、attempt 数と最後の失敗を持って書かれる。</text>
+</svg>
+</div>
+<p>StartToClose か ScheduleToClose の<strong>どちらかは必須</strong>で、既定はどちらも ∞ です。Worker が落ちて連絡が途絶えたとき Server が retry を起こす拠り所は StartToClose なので、公式はこちらを設定することを強く勧めています。</p>
+<div class="repo">このリポジトリでは: <code>Options.ActivityOptions</code> と <code>CompensationOptions</code> はどちらかの timeout を必須にし、補償の <code>ScheduleToCloseTimeout</code> は残り予算に clamp する — <code>saga/saga.go</code>。example はすべて <code>StartToCloseTimeout</code> と <code>MaximumAttempts: 1</code>。</div>
+
+<!-- ============================================================ 5 -->
+<h2><span class="n">5</span>Event History と Replay</h2>
+<p>Worker が Workflow Task を取ると、Workflow 関数を<strong>先頭から</strong>実行し直します。すでに History にある Activity の結果はそこから即座に返るので Activity は再実行されず、History の末尾に追いついたところから新しい Command を出します。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 470" role="img" aria-label="コードの行と History の Event の対応、replay 区間と新規実行区間">
+  <!-- bands: 2つの列を貫く。列の枠は塗らないので帯が透ける -->
+  <rect x="8" y="98" width="784" height="176" rx="6" class="ac band"/>
+  <rect x="8" y="280" width="784" height="90" rx="6" class="wf band"/>
+
+  <text x="16" y="30" class="t">Workflow のコード</text>
+  <text x="140" y="30" class="s">Worker が先頭から実行し直す</text>
+  <text x="430" y="30" class="t">Event History</text>
+  <text x="530" y="30" class="s">Server が持つ。追記のみ</text>
+
+  <!-- code column -->
+  <rect x="16" y="44" width="284" height="330" rx="8" fill="none" stroke="var(--line)"/>
+  <text x="28" y="74" class="m">func Run(ctx workflow.Context) error {</text>
+  <text x="28" y="138" class="m">  res := exec(ctx, Reserve)</text>
+  <text x="200" y="138" class="m c-ac">// ← res-1</text>
+  <text x="28" y="234" class="m">  chg := exec(ctx, Charge)</text>
+  <text x="200" y="234" class="m c-ac">// ← chg-1</text>
+  <text x="28" y="318" class="m">  shp := exec(ctx, Ship)</text>
+  <text x="200" y="318" class="m c-wf">// 実行する</text>
+  <text x="28" y="356" class="m">  return nil</text>
+
+  <!-- history column -->
+  <rect x="430" y="44" width="354" height="330" rx="8" fill="none" stroke="var(--line)"/>
+  <rect x="442" y="56" width="170" height="18" rx="3" class="wf"/><text x="448" y="69" class="xs c-wf">WorkflowExecutionStarted</text>
+  <rect x="442" y="78" width="296" height="18" rx="3" class="box2"/><text x="448" y="91" class="xs">WorkflowTaskScheduled / Started / Completed</text>
+
+  <rect x="442" y="106" width="196" height="18" rx="3" class="ac"/><text x="448" y="119" class="xs c-ac">ActivityTaskScheduled  Reserve</text>
+  <rect x="442" y="130" width="150" height="18" rx="3" class="ac"/><text x="448" y="143" class="xs c-ac">ActivityTaskStarted</text>
+  <rect x="442" y="154" width="230" height="18" rx="3" class="ac"/><text x="448" y="167" class="xs c-ac">ActivityTaskCompleted  result=res-1</text>
+  <rect x="442" y="178" width="296" height="18" rx="3" class="box2"/><text x="448" y="191" class="xs">WorkflowTaskScheduled / Started / Completed</text>
+
+  <rect x="442" y="202" width="196" height="18" rx="3" class="ac"/><text x="448" y="215" class="xs c-ac">ActivityTaskScheduled  Charge</text>
+  <rect x="442" y="226" width="150" height="18" rx="3" class="ac"/><text x="448" y="239" class="xs c-ac">ActivityTaskStarted</text>
+  <rect x="442" y="250" width="230" height="18" rx="3" class="ac"/><text x="448" y="263" class="xs c-ac">ActivityTaskCompleted  result=chg-1</text>
+
+  <rect x="442" y="288" width="226" height="18" rx="3" class="box2"/><text x="448" y="301" class="xs">WorkflowTaskScheduled / Started</text>
+  <text x="676" y="301" class="xs">← 今ここを処理中</text>
+  <rect x="442" y="314" width="330" height="18" rx="3" fill="none" stroke="var(--line)" class="dash"/><text x="448" y="327" class="xs">（この先は無い。次の Event は Command が決める）</text>
+  <rect x="442" y="342" width="196" height="18" rx="3" class="wf"/><text x="448" y="355" class="xs c-wf">ActivityTaskScheduled  Ship</text>
+  <text x="646" y="355" class="xs">← Server が追記する</text>
+
+  <!-- gap: connectors and band labels -->
+  <path d="M440 134 L302 134" class="ln-ac dash" marker-end="url(#a-ac)"/>
+  <text x="365" y="126" text-anchor="middle" class="xs c-ac">結果を読み戻す</text>
+  <text x="365" y="176" text-anchor="middle" class="s c-ac">replay 区間</text>
+  <text x="365" y="192" text-anchor="middle" class="xs c-ac">Activity は実行されない</text>
+  <path d="M440 230 L302 230" class="ln-ac dash" marker-end="url(#a-ac)"/>
+  <text x="365" y="222" text-anchor="middle" class="xs c-ac">結果を読み戻す</text>
+
+  <text x="365" y="298" text-anchor="middle" class="s c-wf">ここから新規実行</text>
+  <path d="M300 322 L440 348" class="ln-wf" marker-end="url(#a-wf)"/>
+  <text x="330" y="352" text-anchor="middle" class="xs c-wf">ScheduleActivityTask</text>
+  <text x="330" y="366" text-anchor="middle" class="xs c-wf">Command</text>
+
+  <text x="16" y="404" class="s">replay 中は「次に出す Command」と「History のその位置の Event」を突き合わせる。Activity の順序が変わる・増える・減ると</text>
+  <text x="16" y="422" class="s">一致せず、nondeterminism error で Workflow Task が失敗する。だから Workflow は決定的でなければならない（図3）。</text>
+  <text x="16" y="452" class="s">Worker が落ちても別の Worker が同じ History から同じ状態を復元できる。これが「durable」の中身。</text>
+</svg>
+</div>
+<div class="repo">このリポジトリでは: 冪等キーが replay で同じ値になるよう <code>KeyFunc</code> は決定的でなければならず、既定は <code>RunID + "/" + name</code> — <code>saga/saga.go</code>。ステップの Activity と補償は同じ History の Event として残る。</div>
+
+<!-- ============================================================ 6 -->
+<h2><span class="n">6</span>Workflow ID / Run ID / Activity ID</h2>
+<p><strong>Workflow ID はあなたが決める業務識別子</strong>（注文番号など）で、Namespace の中で Open な実行について一意です。<strong>Run ID は Temporal が振る実行の識別子</strong>で、Retry・ContinueAsNew・Cron・Reset のたびに新しい Run が同じ Workflow ID の下に連なります。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 440" role="img" aria-label="Workflow ID の下に Run が連なり、各 Run の中に Activity ID がある階層">
+  <rect x="8" y="8" width="784" height="424" rx="10" class="box dash" stroke="var(--ink-3)"/>
+  <text x="20" y="28" class="s">Namespace: default — Workflow ID はこの中で、Open な実行について一意</text>
+
+  <rect x="270" y="48" width="260" height="56" rx="8" class="wf"/>
+  <text x="400" y="70" text-anchor="middle" class="s c-wf">Workflow ID（業務識別子。あなたが決める）</text>
+  <text x="400" y="92" text-anchor="middle" class="m t">order-1234</text>
+
+  <path d="M400 104 L400 122 L144 122 L144 140 M400 122 L400 140 M400 122 L656 122 L656 140" class="ln"/>
+
+  <!-- runs -->
+  <rect x="32" y="142" width="224" height="64" rx="8" class="sv"/>
+  <text x="144" y="162" text-anchor="middle" class="s c-sv">Run ID（Temporal が振る）</text>
+  <text x="144" y="180" text-anchor="middle" class="m">8f3c…a1</text>
+  <text x="144" y="198" text-anchor="middle" class="xs c-bad">Failed</text>
+
+  <rect x="288" y="142" width="224" height="64" rx="8" class="sv"/>
+  <text x="400" y="162" text-anchor="middle" class="s c-sv">Run ID</text>
+  <text x="400" y="180" text-anchor="middle" class="m">7be0…b2</text>
+  <text x="400" y="198" text-anchor="middle" class="xs">ContinuedAsNew</text>
+
+  <rect x="544" y="142" width="224" height="64" rx="8" class="sv"/>
+  <text x="656" y="162" text-anchor="middle" class="s c-sv">Run ID</text>
+  <text x="656" y="180" text-anchor="middle" class="m">c91d…c3</text>
+  <text x="656" y="198" text-anchor="middle" class="xs c-ac">Running</text>
+
+  <path d="M256 174 L286 174" class="ln-sv" marker-end="url(#a-sv)"/>
+  <text x="272" y="222" text-anchor="middle" class="xs c-sv">Retry</text>
+  <path d="M512 174 L542 174" class="ln-sv" marker-end="url(#a-sv)"/>
+  <text x="528" y="222" text-anchor="middle" class="xs c-sv">ContinueAsNew</text>
+
+  <!-- activity ids -->
+  <path d="M144 206 L144 244 M400 206 L400 244 M656 206 L656 244" class="ln"/>
+  <rect x="44" y="244" width="200" height="22" rx="4" class="ac"/><text x="144" y="259" text-anchor="middle" class="xs c-ac">8f3c…a1/reserve</text>
+  <rect x="44" y="272" width="200" height="22" rx="4" class="ac"/><text x="144" y="287" text-anchor="middle" class="xs c-ac">8f3c…a1/charge</text>
+  <rect x="44" y="300" width="200" height="22" rx="4" class="ac"/><text x="144" y="315" text-anchor="middle" class="xs c-ac">8f3c…a1/charge:undo</text>
+  <rect x="44" y="328" width="200" height="22" rx="4" class="ac"/><text x="144" y="343" text-anchor="middle" class="xs c-ac">8f3c…a1/reserve:undo</text>
+
+  <rect x="300" y="244" width="200" height="22" rx="4" class="ac"/><text x="400" y="259" text-anchor="middle" class="xs c-ac">7be0…b2/reserve</text>
+  <rect x="300" y="272" width="200" height="22" rx="4" class="ac"/><text x="400" y="287" text-anchor="middle" class="xs c-ac">7be0…b2/charge</text>
+  <rect x="300" y="300" width="200" height="22" rx="4" class="ac"/><text x="400" y="315" text-anchor="middle" class="xs c-ac">7be0…b2/ship</text>
+
+  <rect x="556" y="244" width="200" height="22" rx="4" class="ac"/><text x="656" y="259" text-anchor="middle" class="xs c-ac">c91d…c3/reserve</text>
+  <rect x="556" y="272" width="200" height="22" rx="4" class="box dash"/><text x="656" y="287" text-anchor="middle" class="xs">（次のステップ）</text>
+
+  <text x="20" y="378" class="s">Activity ID: 1つの Run の中で、Open な Activity 同士で一意。Workflow のコードが指定でき、省略すると SDK が連番を振る。</text>
+  <text x="20" y="396" class="s">1つの実行は Namespace + Workflow ID + Run ID で一意に決まる。同じ Workflow ID の Run の列が Workflow Execution Chain。</text>
+
+  <rect x="20" y="410" width="12" height="12" rx="3" class="wf"/><text x="38" y="421" class="xs">業務識別子（あなたが決める）</text>
+  <rect x="230" y="410" width="12" height="12" rx="3" class="sv"/><text x="248" y="421" class="xs">実行の識別子（Temporal が振る）</text>
+  <rect x="470" y="410" width="12" height="12" rx="3" class="ac"/><text x="488" y="421" class="xs">Activity の識別子（省略可）</text>
+</svg>
+</div>
+<div class="repo">このリポジトリでは: <b>Activity ID にこのライブラリが冪等キーを載せる</b> — <code>saga/step.go</code>。キーの既定が <code>RunID + "/" + name</code> なのは、Retry や ContinueAsNew で別 Run になったら別のキーにするため（<code>FirstRunID</code> は Run をまたいで同じなので使わない） — <code>saga/saga.go</code>。子ワークフローでは同じキーを Workflow ID に載せる — <code>saga/key.go</code>。</div>
+
+<!-- ============================================================ 7 -->
+<h2><span class="n">7</span>Signal / Query / Update と Child Workflow</h2>
+<p>走っている Workflow に外から働きかける手段は3つで、違いは<strong>方向と、History に残るかどうか</strong>です。Workflow が別の Workflow を子として起動することもでき、子は自分の History と、必要なら別の Task Queue を持ちます。</p>
+<div class="strip">
+<svg class="d" viewBox="0 0 800 440" role="img" aria-label="Signal、Query、Update の違いと Child Workflow">
+  <!-- workflow -->
+  <rect x="300" y="40" width="220" height="330" rx="10" class="wf"/>
+  <text x="410" y="64" text-anchor="middle" class="t c-wf">Workflow（OrderSaga）</text>
+  <text x="312" y="100" class="s">Signal handler → 状態を変える</text>
+  <text x="312" y="176" class="s">Query handler → 状態を返す</text>
+  <text x="312" y="192" class="xs">（block はできない）</text>
+  <text x="312" y="254" class="s">Update handler → 検証・変更・返す</text>
+
+  <!-- signal -->
+  <rect x="16" y="76" width="134" height="36" rx="6" class="box"/>
+  <text x="83" y="99" text-anchor="middle" class="t">Signal</text>
+  <path d="M150 94 L298 94" class="ln-wf" marker-end="url(#a-wf)"/>
+  <text x="224" y="86" text-anchor="middle" class="xs">一方向・非同期・Worker 不要</text>
+  <rect x="160" y="104" width="172" height="18" rx="3" class="wf"/><text x="166" y="117" class="xs c-wf">WorkflowExecutionSignaled</text>
+
+  <!-- query -->
+  <rect x="16" y="150" width="134" height="36" rx="6" class="box"/>
+  <text x="83" y="173" text-anchor="middle" class="t">Query</text>
+  <path d="M150 160 L298 160" class="ln" marker-end="url(#a-ink)"/>
+  <path d="M298 178 L152 178" class="ln dash" marker-end="url(#a-ink)"/>
+  <text x="224" y="152" text-anchor="middle" class="xs">読むだけ・同期</text>
+  <text x="160" y="200" class="xs">Event は残らない・状態を変えない</text>
+  <text x="160" y="214" class="xs">完了した Workflow にも送れる</text>
+
+  <!-- update -->
+  <rect x="16" y="228" width="134" height="36" rx="6" class="box"/>
+  <text x="83" y="251" text-anchor="middle" class="t">Update</text>
+  <path d="M150 238 L298 238" class="ln-wf" marker-end="url(#a-wf)"/>
+  <path d="M298 256 L152 256" class="ln-wf dash" marker-end="url(#a-wf)"/>
+  <text x="224" y="230" text-anchor="middle" class="xs">双方向・同期・validator で拒否できる</text>
+  <rect x="16" y="272" width="250" height="18" rx="3" class="wf"/><text x="22" y="285" class="xs c-wf">WorkflowExecutionUpdateAcceptedEvent</text>
+  <rect x="16" y="294" width="250" height="18" rx="3" class="wf"/><text x="22" y="307" class="xs c-wf">WorkflowExecutionUpdateCompletedEvent</text>
+  <text x="16" y="330" class="xs">Worker の応答を待つ。受理されると History に残る</text>
+
+  <!-- external signal -->
+  <rect x="580" y="40" width="204" height="44" rx="8" class="box"/>
+  <text x="682" y="59" text-anchor="middle" class="t">別の Workflow（Inventory）</text>
+  <text x="682" y="76" text-anchor="middle" class="xs">同じ Namespace の他の実行</text>
+  <path d="M520 62 L578 62" class="ln-wf" marker-end="url(#a-wf)"/>
+  <text x="549" y="54" text-anchor="middle" class="xs">Signal</text>
+
+  <!-- child -->
+  <rect x="580" y="120" width="204" height="120" rx="8" class="sv"/>
+  <text x="682" y="144" text-anchor="middle" class="t c-sv">Child Workflow（Pack）</text>
+  <text x="592" y="170" class="xs">自分の Event History を持つ</text>
+  <text x="592" y="188" class="xs">別の Task Queue / Worker でもよい</text>
+  <text x="592" y="206" class="xs">親と状態は共有しない（Signal で通信）</text>
+  <text x="592" y="224" class="xs">親は開始を待ち、結果は待ってもよい</text>
+  <path d="M520 150 L578 150" class="ln-sv" marker-end="url(#a-sv)"/>
+  <text x="549" y="142" text-anchor="middle" class="xs">起動</text>
+  <path d="M578 200 L522 200" class="ln-sv dash" marker-end="url(#a-sv)"/>
+  <text x="549" y="216" text-anchor="middle" class="xs">結果</text>
+
+  <text x="580" y="270" class="s">親の History に残る Event</text>
+  <rect x="580" y="278" width="204" height="18" rx="3" class="sv"/><text x="586" y="291" class="xs c-sv">StartChildWorkflowExecutionInitiated</text>
+  <rect x="580" y="300" width="204" height="18" rx="3" class="sv"/><text x="586" y="313" class="xs c-sv">ChildWorkflowExecutionStarted</text>
+  <rect x="580" y="322" width="204" height="18" rx="3" class="sv"/><text x="586" y="335" class="xs c-sv">ChildWorkflowExecutionCompleted</text>
+
+  <text x="580" y="366" class="s">Parent Close Policy（親が閉じたとき）</text>
+  <text x="580" y="384" class="xs">Terminate（既定）/ RequestCancel / Abandon</text>
+
+  <text x="16" y="366" class="s">3つとも Client、CLI から送れる。Workflow から他の</text>
+  <text x="16" y="384" class="s">Workflow へ送れるのは Signal だけ（Update は Activity 経由）。</text>
+  <text x="16" y="416" class="s">Signal は宛先の Worker が居なくても届き、History に残って Worker が次に Workflow Task を取ったとき処理される。Update は Worker の応答を待つ。</text>
+</svg>
+</div>
+<div class="repo">このリポジトリでは: signal 待ちを1ステップにする <code>saga.AwaitSignal</code> — <code>saga/signal.go</code>、<code>example/approval/</code>。子ワークフローをステップにする <code>saga.ChildWorkflow</code> — <code>example/childflow/</code>。Workflow から別の Workflow へ signal を送るステップ — <code>example/external/</code>（Query も <code>HeldQuery</code> として使う）。</div>
+
+<footer>
+  <div>次に読むもの: <a href="design.md">docs/design.md</a>（なぜこの形か）→ <a href="activity-contract.md">docs/activity-contract.md</a>（Activity 側の約束）→ <a href="patterns.md">docs/patterns.md</a>（よくある形と example）</div>
+  <h2 style="margin-top:28px">出典</h2>
+  <p style="font-size:12.5px">図に描いた事実はすべて Temporal 公式ドキュメントで確認した（2026-09 時点）。Event 名と timeout 名は公式の表記のまま。</p>
+  <ol>
+    <li>Temporal Service と Worker の分担、Worker Process / Worker Entity — <a href="https://docs.temporal.io/workers">https://docs.temporal.io/workers</a></li>
+    <li>Task Queue（poll、動的生成、Workflow / Activity Task Queue、Task Routing、Queue 名の継承） — <a href="https://docs.temporal.io/task-queue">https://docs.temporal.io/task-queue</a></li>
+    <li>Task の種類、Workflow Task の処理（replay の手順）、Activity Task と Event の対応 — <a href="https://docs.temporal.io/tasks">https://docs.temporal.io/tasks</a></li>
+    <li>Namespace（分離の単位、Workflow ID の一意性、Task Queue の所属） — <a href="https://docs.temporal.io/namespaces">https://docs.temporal.io/namespaces</a></li>
+    <li>Go SDK の Workflow 制約と <code>workflow</code> パッケージの代替 — <a href="https://docs.temporal.io/develop/go/workflows/basics">https://docs.temporal.io/develop/go/workflows/basics</a></li>
+    <li>決定性の制約、Command と Event の突き合わせ、nondeterminism error — <a href="https://docs.temporal.io/workflow-definition">https://docs.temporal.io/workflow-definition</a></li>
+    <li>Activity の4つの timeout と Heartbeat、それぞれの区間と retry との関係 — <a href="https://docs.temporal.io/encyclopedia/detecting-activity-failures">https://docs.temporal.io/encyclopedia/detecting-activity-failures</a></li>
+    <li>Retry Policy の既定値、Activity は既定で retry し Workflow はしない — <a href="https://docs.temporal.io/encyclopedia/retry-policies">https://docs.temporal.io/encyclopedia/retry-policies</a></li>
+    <li>Event の一覧と各 Event の属性（ActivityTaskStarted が終端 Event と同時に書かれること、attempt） — <a href="https://docs.temporal.io/references/events">https://docs.temporal.io/references/events</a></li>
+    <li>Event History、Side Effect、History の上限と Continue-As-New — <a href="https://docs.temporal.io/workflow-execution/event">https://docs.temporal.io/workflow-execution/event</a></li>
+    <li>Command、Workflow Execution Chain、Namespace + Workflow ID + Run ID の一意性 — <a href="https://docs.temporal.io/workflow-execution">https://docs.temporal.io/workflow-execution</a></li>
+    <li>Workflow ID と Run ID、Run を増やす操作（ContinueAsNew / Retry / Cron / Reset）、Reuse Policy — <a href="https://docs.temporal.io/workflow-execution/workflowid-runid">https://docs.temporal.io/workflow-execution/workflowid-runid</a></li>
+    <li>Activity Execution と Activity ID（Run の中で Open な Activity 同士で一意） — <a href="https://docs.temporal.io/activity-execution">https://docs.temporal.io/activity-execution</a></li>
+    <li>Signal / Query / Update の違い（Query は History に残らず完了後も可、Update は受理されると残る） — <a href="https://docs.temporal.io/encyclopedia/workflow-message-passing">https://docs.temporal.io/encyclopedia/workflow-message-passing</a></li>
+    <li>Signal / Query / Update の送り方（Workflow から他の Workflow への Update は Activity 経由） — <a href="https://docs.temporal.io/sending-messages">https://docs.temporal.io/sending-messages</a></li>
+    <li>Child Workflow（自分の History、別の Worker 群で処理できる、親は開始を待つ） — <a href="https://docs.temporal.io/child-workflows">https://docs.temporal.io/child-workflows</a></li>
+    <li>Parent Close Policy（Terminate が既定） — <a href="https://docs.temporal.io/parent-close-policy">https://docs.temporal.io/parent-close-policy</a></li>
+  </ol>
+</footer>
+
+</div>
+</body>
+</html>
