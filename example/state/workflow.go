@@ -1,14 +1,23 @@
 // Package state is the example for keeping the body of a saga short.
 //
-// Once the requests an activity takes have more than a couple of fields, a saga
-// written inline turns into a wall: every saga.Step call carries a literal that
-// restates half the workflow input. Here the workflow input and everything the
-// steps produce live in one struct, each step is a method on it, and the
-// closure passed to saga.Run is two lines.
+// Once a saga has five steps and the requests its activities take have more
+// than a couple of fields, a saga written inline turns into a wall: every
+// saga.Step call carries a struct literal that restates half of the workflow
+// input, the ids the earlier steps returned become plumbing threaded through
+// the body, and the order of the steps -- the one thing a reader opens a saga
+// to find -- is buried in all of it.
 //
-// The one rule to keep in mind is that saga.Step's input is an activity
+// Here the workflow input and everything the steps produce live in one struct,
+// each step is a method on it, and the closure passed to saga.Run is two lines.
+//
+// The same saga is written the other way in workflow_flat.go so the two can be
+// read against each other. Neither is wrong; the flat one is what every other
+// example in this repository does, and for three narrow steps it is the one to
+// prefer. docs/specs/state.feature runs both and checks they agree.
+//
+// The one rule to keep in mind is that saga.Step's input is the activity's
 // argument, so it has to be serializable. The state struct itself never goes to
-// an activity; the methods build a request from it.
+// an activity; the methods build the request from it.
 package state
 
 import (
@@ -20,11 +29,20 @@ import (
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
-// TaskQueue is shared between the worker and whoever starts the workflow.
+// TaskQueue is shared between the worker and whoever starts the workflow. Both
+// shapes of this example run on it.
 const TaskQueue = "saga-state"
 
+// ApprovalSignal carries the decision the approve step waits for. The payload
+// is a Decision.
+const ApprovalSignal = "approval"
+
+// DeniedType is the error type the saga fails with when a reviewer says no, so
+// a caller can tell it apart from a step that broke.
+const DeniedType = "ApprovalDenied"
+
 // Order is the workflow input. It has enough fields that restating them at
-// every step would be the problem this example is about.
+// every step is the problem this example is about.
 type Order struct {
 	ID       string `json:"id"`
 	Customer string `json:"customer"`
@@ -34,40 +52,68 @@ type Order struct {
 	Currency string `json:"currency"`
 	Address  string `json:"address"`
 	Coupon   string `json:"coupon,omitempty"`
-	FailAt   string `json:"fail_at,omitempty"`
+
+	// WaitSeconds bounds how long a reviewer has. Zero means one minute.
+	WaitSeconds int `json:"wait_seconds,omitempty"`
+	// FailAt names a step whose activity should fail.
+	FailAt string `json:"fail_at,omitempty"`
 }
 
-// Receipt is the workflow output.
+// wait is how long the approve step gives a reviewer.
+func (o Order) wait() time.Duration {
+	if o.WaitSeconds <= 0 {
+		return time.Minute
+	}
+	return time.Duration(o.WaitSeconds) * time.Second
+}
+
+// Decision is what a reviewer sends.
+type Decision struct {
+	Approved bool   `json:"approved"`
+	By       string `json:"by"`
+}
+
+// Receipt is the workflow output. Both shapes return the same one, which is
+// what the specification compares.
 type Receipt struct {
 	Reservation string `json:"reservation"`
 	Charge      string `json:"charge"`
+	ApprovedBy  string `json:"approved_by"`
+	Pack        string `json:"pack"`
 	Shipment    string `json:"shipment"`
 }
 
-// StateWorkflow is the same three-step saga as the other examples, written so
-// that the body of saga.Run is two lines.
-func StateWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-	opts := saga.Options{
+// sagaOptions is shared with the flat shape in workflow_flat.go. The difference
+// between the two is meant to be the body of the saga, not its options.
+func sagaOptions() saga.Options {
+	return saga.Options{
 		ActivityOptions: workflow.ActivityOptions{
 			StartToCloseTimeout: 10 * time.Second,
 			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 		},
 		CompensationBudget: time.Minute,
 	}
+}
 
-	return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+// StateWorkflow reserves stock, charges against that reservation, waits for a
+// reviewer, packs, and ships against that charge -- five steps, written so that
+// the body of saga.Run is two lines. Compare workflow_flat.go.
+func StateWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
+	return saga.Run(ctx, sagaOptions(), func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 		w := &fulfillment{in: in}
 		return w.run(ctx, s)
 	})
 }
 
-// fulfillment is the workflow's state: its input, and what each step produced.
+// fulfillment is the workflow's state: the input, and what each step produced.
 // It never leaves the workflow, so it does not have to be serializable.
 type fulfillment struct {
 	in Order
 
 	reservation string
 	charge      string
+	approvedBy  string
+	packing     string
 	shipment    string
 }
 
@@ -75,17 +121,25 @@ type fulfillment struct {
 func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 	w.reserve(ctx, s)
 	w.chargeCard(ctx, s)
+	w.approve(ctx, s)
+	w.pack(ctx, s)
 	w.ship(ctx, s)
 
 	if err := s.Err(); err != nil {
 		return Receipt{}, err
 	}
-	return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
+	return Receipt{
+		Reservation: w.reservation,
+		Charge:      w.charge,
+		ApprovedBy:  w.approvedBy,
+		Pack:        w.packing,
+		Shipment:    w.shipment,
+	}, nil
 }
 
-// Each step pulls what it needs out of the state and puts its result back. The
-// step error is not returned: after the first failure the later steps are
-// no-ops, and run checks s.Err() once, before building the receipt.
+// Each step pulls what it needs out of the state and puts its result back.
+// The step errors are not returned: after the first failure every later Step is
+// a no-op, and run checks s.Err() once, before building the receipt.
 
 func (w *fulfillment) reserve(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
@@ -112,13 +166,67 @@ func (w *fulfillment) chargeCard(ctx workflow.Context, s *saga.Saga) {
 	})
 }
 
+// approve waits for a reviewer. It is a Func step: the waiting is workflow
+// code, so there is no activity, nothing to undo, and nothing in the workflow
+// history for the specification to find.
+func (w *fulfillment) approve(ctx workflow.Context, s *saga.Saga) {
+	decision, _ := saga.Step(ctx, s, "approve", saga.Func(awaitApproval), nil, ApproveReq{
+		Order:    w.in.ID,
+		Customer: w.in.Customer,
+		Amount:   w.in.Amount,
+		Wait:     w.in.wait(),
+	})
+	w.approvedBy = decision.By
+}
+
+func (w *fulfillment) pack(ctx workflow.Context, s *saga.Saga) {
+	var a *Activities
+
+	w.packing, _ = saga.Step(ctx, s, "pack", saga.Activity(a.Pack), saga.UndoActivity(a.Unpack), PackReq{
+		Order:    w.in.ID,
+		SKU:      w.in.SKU,
+		Quantity: w.in.Quantity,
+		Address:  w.in.Address,
+		Fail:     w.in.FailAt == "pack",
+	})
+}
+
 func (w *fulfillment) ship(ctx workflow.Context, s *saga.Saga) {
 	var a *Activities
 
 	w.shipment, _ = saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{
-		Order:   w.in.ID,
-		Address: w.in.Address,
-		Charge:  w.charge,
-		Fail:    w.in.FailAt == "ship",
+		Order:      w.in.ID,
+		Address:    w.in.Address,
+		Charge:     w.charge,
+		ApprovedBy: w.approvedBy,
+		Fail:       w.in.FailAt == "ship",
 	})
+}
+
+// ApproveReq is the input of the approve step. The step is a Func, so this
+// never reaches an activity; it stays here with the workflow code that reads
+// it.
+type ApproveReq struct {
+	Order    string        `json:"order"`
+	Customer string        `json:"customer"`
+	Amount   int           `json:"amount"`
+	Wait     time.Duration `json:"wait"`
+}
+
+// awaitApproval waits for a reviewer and turns the answer into a result or an
+// error. Both shapes of this example use it.
+//
+// Returning an error is the whole rollback trigger: Run undoes the charge and
+// the reservation on the way out.
+func awaitApproval(ctx workflow.Context, req ApproveReq) (Decision, error) {
+	decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+	if !ok {
+		return Decision{}, temporal.NewApplicationError(
+			"nobody reviewed order "+req.Order+" in time", DeniedType, nil)
+	}
+	if !decision.Approved {
+		return Decision{}, temporal.NewApplicationError(
+			"the order was rejected by "+decision.By, DeniedType, nil)
+	}
+	return decision, nil
 }

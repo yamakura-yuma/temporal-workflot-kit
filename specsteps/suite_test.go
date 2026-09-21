@@ -45,16 +45,16 @@ const holdEnv = "SPEC_HOLD"
 // specsDir is where the .feature files live, relative to this package.
 const specsDir = "../docs/specs"
 
-// suite is what the whole run shares. The workers hold these ledger instances
-// for their lifetime, so the ledgers cannot be per-scenario; handing them to
+// suite is what the whole run shares. The workers hold these store instances
+// for their lifetime, so the stores cannot be per-scenario; handing them to
 // each scenario through its context is what keeps them out of package-level
 // variables.
 type suite struct {
 	client    client.Client
-	order     *order.Ledger
-	pipeline  *pipeline.Ledger
-	childflow *childflow.Ledger
-	state     *state.Ledger
+	order     *order.Store
+	pipeline  *pipeline.Store
+	childflow *childflow.Store
+	state     *state.Store
 }
 
 // suiteRun is the one piece of package-level state left: what TestMain has to
@@ -112,7 +112,7 @@ func TestFeatures(t *testing.T) {
 			Strict:   true,
 			TestingT: t,
 			// Concurrency stays at the default 1. The scenarios share one set of
-			// ledgers and one dev server, so they cannot run in parallel.
+			// stores and one dev server, so they cannot run in parallel.
 		},
 	}
 
@@ -178,14 +178,14 @@ func startSuite() (*suiteRun, error) {
 
 	r.suite = &suite{
 		client:    r.devServer.Client(),
-		order:     order.NewLedger(),
-		pipeline:  pipeline.NewLedger(),
-		childflow: childflow.NewLedger(),
-		state:     state.NewLedger(),
+		order:     order.NewStore(),
+		pipeline:  pipeline.NewStore(),
+		childflow: childflow.NewStore(),
+		state:     state.NewStore(),
 	}
 
 	// The order example's activities are shared with the approval example, so
-	// both write to the same ledger.
+	// both write to the same store.
 	orderActivities := order.NewActivities(r.suite.order)
 
 	start := func(name string, register func(w worker.Worker)) error {
@@ -231,8 +231,12 @@ func startSuite() (*suiteRun, error) {
 		return r, err
 	}
 
+	// The state example is written twice, and both shapes run here: the
+	// specification starts them over the same order and compares the receipts,
+	// which is the only thing keeping the flat one from rotting.
 	if err := start(state.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(state.StateWorkflow)
+		w.RegisterWorkflow(state.FlatWorkflow)
 		w.RegisterActivity(state.NewActivities(r.suite.state))
 	}); err != nil {
 		return r, err
@@ -241,7 +245,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(external.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(external.ExternalWorkflow)
 		w.RegisterWorkflow(external.InventoryWorkflow)
-		w.RegisterActivity(external.NewActivities(external.NewLedger()))
+		w.RegisterActivity(external.NewActivities(external.NewStore()))
 	}); err != nil {
 		return r, err
 	}

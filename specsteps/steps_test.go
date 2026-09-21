@@ -56,6 +56,7 @@ type scenarioState struct {
 	*suite
 
 	run       client.WorkflowRun // the saga under test
+	flat      client.WorkflowRun // the state example's second shape, when a scenario runs both
 	inventory client.WorkflowRun // the external example's long-lived workflow
 	result    error              // the saga's outcome, once awaited
 	awaited   bool

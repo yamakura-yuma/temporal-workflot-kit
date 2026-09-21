@@ -15,7 +15,7 @@ Temporal dev server です。理由は `docs/development.md`「スイートが2�
 | | 仕様 | 何の変種か |
 | --- | --- | --- |
 | 1 | [`rollback.feature`](rollback.feature) | **基本形。** アクティビティを順に実行し、失敗したら逆順で取り消す。成功・失敗・キャンセル・補償自体の失敗の4通り |
-| 2 | [`state.feature`](state.feature) | 同じ振る舞いを、**書き方を変えて**も保てるか。ステップを構造体のメソッドに割る |
+| 2 | [`state.feature`](state.feature) | 同じ振る舞いを、**書き方を変えて**も保てるか。5ステップの saga を構造体のメソッドに割った形と、素のまま並べた形の両方を動かして比べる |
 | 3 | [`pipeline.feature`](pipeline.feature) | ステップの間に**データが流れる**とき。前段の出力が次段の入力になり、補償にも渡る |
 | 4 | [`approval.feature`](approval.feature) | ステップが**アクティビティでない**とき その1。人の承認を待つ |
 | 5 | [`childflow.feature`](childflow.feature) | ステップが**アクティビティでない**とき その2。子ワークフロー。しかも forward と取り消しで実行の仕方が違う |

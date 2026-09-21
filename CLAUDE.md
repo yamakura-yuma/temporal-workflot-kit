@@ -34,12 +34,14 @@ Temporal のワークフローを書くための Go の部品集。今入って�
 - `example/approval/` — signal 待ちを `saga.Func` でステップにする例。
   アクティビティは order のものを使い、待つ部分だけを見せる
 - `example/pipeline/` — 前段の出力が次段の入力になる例
-- `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例
+- `example/state/` — state 構造体とメソッドに割り、`Run` の中を短く保つ例。5ステップ
+  （うち1つは signal 待ち）あり、同じ saga を素の形で書いた `workflow_flat.go` を
+  並べて置く。仕様が両方を動かして同じ結果になることを確かめる
 - `example/childflow/` — ステップが子ワークフローの例（`saga.ChildWorkflow`）
 - `example/external/` — signal で他のワークフローを動かす例（`saga.Func`）
 
 example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。
-example の入口は `workflow.go`。アクティビティとその裏の台帳は `activity.go`。
+example の入口は `workflow.go`。アクティビティとその下流のストアは `activity.go`。
 自前のアクティビティを持たない example は `workflow.go` だけでよい。
 
 ここにアプリケーションは無く、`internal/` も無い。このリポジトリはライブラリであり、

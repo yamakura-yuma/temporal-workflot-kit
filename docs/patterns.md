@@ -10,10 +10,10 @@
 | --- | --- | --- | --- |
 | ステップはアクティビティに限るのか | 限らない。`saga.Step` に渡す値で決まる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
 | アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
-| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行 | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
+| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行。素の形との読み比べは [`workflow_flat.go`](../example/state/workflow_flat.go) | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
 | signal を待つには | `saga.Func` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
 | signal を送るステップは書けるか | 書ける。`saga.Func` で。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
-| 基本形 | 3ステップと補償、冪等キーを claim するアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
+| 基本形 | 3ステップと補償、冪等キーを行の主キーにするアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
 ---
 
@@ -121,16 +121,25 @@ return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, er
 func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
     w.reserve(ctx, s)
     w.chargeCard(ctx, s)
+    w.approve(ctx, s)
+    w.pack(ctx, s)
     w.ship(ctx, s)
 
     if err := s.Err(); err != nil {
         return Receipt{}, err
     }
-    return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
+    return Receipt{Reservation: w.reservation, Charge: w.charge, ApprovedBy: w.approvedBy,
+        Pack: w.packing, Shipment: w.shipment}, nil
 }
 ```
 
 `saga.Step` が `ctx` と `s` を引数で取るので、ステップはメソッドでも関数でも好きに割れます。
+
+同じ saga を素の形で書いたものが [`example/state/workflow_flat.go`](../example/state/workflow_flat.go)
+にあります。入力も5ステップも同じで、違うのは本体の書き方だけなので、2つを並べて読めば
+上の閾値が実物として見えます。どちらが読みやすいかは読者が決めてください。仕様
+（[`state.feature`](specs/state.feature)）は両方を動かして同じ `Receipt` が返ることを
+確かめているので、片方だけ直されて食い違うことはありません。
 
 **state 構造体そのものを `saga.Step` に渡すことはできません。** アクティビティのステップでは
 `in` がそのままアクティビティの引数になるので、シリアライズ可能である必要があります。メソッドの中で state からリクエストを
