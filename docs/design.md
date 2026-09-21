@@ -132,12 +132,13 @@ t=10.5  ゲートウェイから 200 が返り、課金が確定する
 
 ### このライブラリだと
 
-`saga.Activity` は、forward を投げる**前**に取り消しを積みます。
+`saga.Step` は、forward を投げる**前**に取り消しを積みます。
 
 ```go
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, req)
-//                                    ~~~~~~~~  ~~~~~~~~
-//                                    これを投げる前に、これを積む
+chg, _ := saga.Step(ctx, s, "charge",
+    saga.Activity(a.Charge), saga.UndoActivity(a.Refund), req)
+//  ~~~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//  これを投げる前に、        これを積む
 ```
 
 失敗しても、タイムアウトしても、`Refund` は必ず呼ばれます。
@@ -330,7 +331,8 @@ if s.err != nil {
 
 ### やりたいこと
 
-`saga.Step(..., a.Charge, a.Refund, ...)` の2つを、うっかり逆に書いた。気づきたい。
+`saga.Step(..., saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ...)` の2つを、
+うっかり逆に書いた。気づきたい。
 
 ### 素直に書くと
 
@@ -355,27 +357,33 @@ func Step(s *Saga, name string, fwd, undo any, args ...any)
 
 ```go
 func Step[In, Out any](ctx workflow.Context, s *Saga, name string,
-    e Exec[In, Out], in In) (Out, error)
+    fwd Forward[In, Out], undo *Undo[In], in In) (Out, error)
 
-func Activity[In, Out any](
-    fwd  func(context.Context, In) (Out, error),
-    undo func(context.Context, In) error) Exec[In, Out]
+func Activity[In, Out any](fwd func(context.Context, In) (Out, error)) Forward[In, Out]
+
+func UndoActivity[In any](undo func(context.Context, In) error) *Undo[In]
 ```
 
-`fwd` は値とエラーを返し、`undo` はエラーだけを返します。この非対称が効きます。逆に書くと
-戻り値の形が合わず、**コンパイルエラー**になります。
+forward は値とエラーを返し、補償はエラーだけを返します。この非対称が効きます。逆に書くと
+戻り値の形が合わず、**コンパイルエラー**になります。しかも `Activity` と `UndoActivity` の
+両方で落ちるので、どちらを直せばいいかも分かります。
 
 ```go
-saga.Step(ctx, s, "charge", a.Refund, a.Charge, req)
-//                          ~~~~~~~~ わざと逆に書いてみる
+saga.Step(ctx, s, "charge", saga.Activity(a.Refund), saga.UndoActivity(a.Charge), req)
+//                                        ~~~~~~~~                    ~~~~~~~~
+//                                        わざと逆に書いてみる
 ```
 
 実際にコンパイラが出すのはこれです。
 
 ```
-vet: in call to saga.Step, type func(ctx context.Context, req ChargeReq) error
+in call to saga.Activity, type func(ctx context.Context, req ChargeReq) error
 of a.Refund does not match inferred type func(context.Context, ChargeReq) (Out, error)
 for func(context.Context, In) (Out, error)
+
+in call to saga.UndoActivity, type func(ctx context.Context, req ChargeReq) (string, error)
+of a.Charge does not match inferred type func(context.Context, ChargeReq) error
+for func(context.Context, In) error
 ```
 
 走らせる前に、エディタが赤線を引きます。
@@ -456,8 +464,8 @@ if errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType {
 **アクティビティ関数のシグネチャそのもの**なので、子ワークフローは渡せません。
 
 ```go
-// 子ワークフローは第1引数が workflow.Context なので、Step には入らない
-saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, req)   // コンパイルエラー
+// 子ワークフローは第1引数が workflow.Context なので、Activity には入らない
+saga.Step(ctx, s, "pack", saga.Activity(PackWorkflow), nil, req)   // コンパイルエラー
 ```
 
 逃げ道は `s.Add` で手書きすることですが、そうすると冪等キーも予算の切り詰めも自分で
@@ -475,26 +483,35 @@ SDK を確認すると、executor ごとに違うのは3点だけです。
 | --- | --- | --- | --- |
 | `saga.Activity` | `ExecuteActivity` | `ActivityOptions.ActivityID` | `ScheduleToCloseTimeout` |
 | `saga.ChildWorkflow` | `ExecuteChildWorkflow` | `ChildWorkflowOptions.WorkflowID` | `WorkflowExecutionTimeout` |
-| `saga.Func` | `SignalExternalWorkflow` | **無い** | 無い（コマンドなので即応答） |
 | `saga.Func` | **その場で呼ぶ** | 遠隔実行が無いので不要 | 切るものが無い |
 
-名前は「何を実行するか + Step」で揃えています。`Step` という名前を1つだけ特別扱いすると、
-それがアクティビティ専用であることが名前から読めません。
+名前は「何を実行するか」で揃えています。`Step` は1つだけで、何で実行するかは渡す値が
+決めます。`Step` という名前がアクティビティ専用だと、名前からそれが読めません。
+
+外部ワークフローへの signal に専用の値を用意していないのもこの表のためです。
+`SignalExternalWorkflow` には options 構造体が無いので、鍵を載せる場所も切る予算も
+ありません。鍵も予算も扱わない executor は `saga.Func` に語彙を足しただけになります。
 
 ### このライブラリだと
 
-中核を `register` に切り出し、上の3点だけを差し替えた `saga.ChildWorkflow` と `saga.Func` を
-用意しています。
+中核は `Step` のまま、上の3点だけを閉じ込めたクロージャを作る値として
+`saga.ChildWorkflow` と `saga.Func`、および対応する `saga.Undo*` を用意しています。
 
 ```go
-pack, _ := saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+pack, _ := saga.Step(ctx, s, "pack",
+    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
 
-saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease), HoldReq{SKU: in.SKU})
+saga.Step(ctx, s, "hold",
+    saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{SKU: in.SKU})
 ```
 
-形は `saga.Activity` と同じ。`fwd` が値とエラーを返し `undo` がエラーだけを返す非対称も同じなので、
-取り違えはやはりコンパイルエラーになります。**第1引数の型が executor を選ぶ**ので、
-どちらを呼ぶかは型が教えてくれます。
+形は `saga.Activity` と同じ。forward が値とエラーを返し補償がエラーだけを返す非対称も
+同じなので、取り違えはやはりコンパイルエラーになります。**渡す関数の第1引数の型が
+executor を選ぶ**ので、どちらを呼ぶかは型が教えてくれます。
+
+forward と補償は別々の値なので、**片方だけ別の executor にできます**。上の `pack` が
+それで、荷造りは子ワークフロー、荷ほどきはアクティビティ1回です。鍵は両側で同じなので、
+子は `IdempotencyKeyOf`、アクティビティは `IdempotencyKey` で同じ値を読みます。
 
 混在した saga は1つの逆順で巻き戻ります。補償のレジストリは元から
 `func(workflow.Context) error` を持っているだけで、executor を区別していないからです。
@@ -523,7 +540,7 @@ if !decision.Approved {
 判断はその関数の中で完結し、本体はステップの列のままになります。
 
 ```go
-saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
 
 // 利用者が書く。アクティビティを書くのと同じ立ち位置
 func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {

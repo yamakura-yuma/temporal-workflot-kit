@@ -48,10 +48,13 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
     return saga.Run(ctx, saga.Options{
         ActivityOptions:    workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second},
         CompensationBudget: 5 * time.Minute,
-    }, func(s *saga.Saga) (Receipt, error) {
-        res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-        chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
-        shp, _ := saga.Step(ctx, s, "ship", a.Ship, a.CancelShipment, ShipReq{Order: in})
+    }, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+        res, _ := saga.Step(ctx, s, "reserve",
+            saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
+        chg, _ := saga.Step(ctx, s, "charge",
+            saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in})
+        shp, _ := saga.Step(ctx, s, "ship",
+            saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in})
 
         return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
     })
@@ -133,10 +136,10 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 | | |
 | --- | --- |
 | `saga.Run(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
-| `saga.Step(ctx, s, name, exec, in)` | forward のアクティビティを1つ実行し、その補償を登録する |
-| `saga.Step(ctx, s, name, fwd, undo, in)` | 同じことを子ワークフローで行う |
-
-| `saga.Step(ctx, s, name, fwd, undo, in)` | ワークフローコードをその場で呼んでステップにする |
+| `saga.Step(ctx, s, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
+| `saga.Activity(f)` / `saga.UndoActivity(f)` | その半分をアクティビティで実行する |
+| `saga.ChildWorkflow(f)` / `saga.UndoChildWorkflow(f)` | その半分を子ワークフローで実行する |
+| `saga.Func(f)` / `saga.UndoFunc(f)` | その半分をこのワークフローの中で呼ぶ |
 | `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`saga.Func` の中で使う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
 | `saga.IdempotencyKey(ctx)` | アクティビティ側から冪等キーを読む |
@@ -149,7 +152,7 @@ go get github.com/yamakura-yuma/temporal-saga/saga
 ## 貢献方法
 
 ```bash
-just ci      # fmt-check, vet, build, ユニットテスト, 仕様
+just ci      # fmt-check, vet, build, ユニットテスト, docs-check, 仕様
 ```
 
 すべてコンテナの中で動くので、ホストに Go を入れる必要はありません。どちらのスイートに

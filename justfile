@@ -57,6 +57,12 @@ spec-validate:
 spec-steps:
     {{dev}} grep -rn '^var _ = gauge.Step("' stepImpl/ | sed -E 's/:var _ = gauge\.Step\("/  ->  /; s/".*$//'
 
+# docs と README のコード例が現行 API と合っているか、上流由来のノートが go.mod の
+# SDK 版と合っているかを確認する。docs のコードブロックはコンパイルされないので、
+# 腐りを止めるのはここだけ。
+docs-check:
+    {{dev}} bash scripts/docs-check.sh
+
 # Format the tree in place.
 fmt:
     {{dev}} gofmt -l -w .
@@ -70,7 +76,7 @@ tidy:
     {{dev}} go mod tidy
 
 # Everything that must pass before a change ships.
-ci: fmt-check vet build test spec-validate spec
+ci: fmt-check vet build test docs-check spec-validate spec
 
 # --- agent config ------------------------------------------------------------
 

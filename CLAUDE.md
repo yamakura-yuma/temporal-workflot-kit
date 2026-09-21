@@ -14,7 +14,8 @@ Temporal 上で Saga パターンを実装するための Go ライブラリ。�
   実行して補償を登録する。ユニットテストは Temporal のインメモリ環境で動く
 - `docs/` — ドキュメント。`design.md`（なぜこの形か）、`patterns.md`（よくある形と
   example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
-  こと）、`development.md`（開発手順）
+  こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
+  得た事実の出自と、その版）
 - `docs/specs/` — Gauge の markdown で書かれた実行される仕様。日本語。スイートが
   プロセス内に起動する実際の Temporal dev server に対して実行する。コードとの
   対応づけはステップ文が `gauge.Step(...)` の文字列と一致することだけ。場所は
@@ -48,8 +49,10 @@ example は1テーマ1個。増やすときもこの単位を守り、`diagram.h
 - `just spec` — `docs/specs/` の仕様を実際の dev server に対して実行
 - `just spec-validate` — 全ステップに実装があるかを、実行せずに確認
 - `just spec-steps` — どの Go 関数がどのステップを実装しているかの対応表
-- `just ci` — fmt-check, vet, build, ユニットテスト, spec-validate, spec。変更を
-  出す前に通す
+- `just docs-check` — docs と README のコード例が現行 API と合っているか、上流由来の
+  ノートが `go.mod` の SDK 版と合っているか
+- `just ci` — fmt-check, vet, build, ユニットテスト, docs-check, spec-validate, spec。
+  変更を出す前に通す
 - `just shell` — dev コンテナの対話シェル
 
 ## スキル
@@ -57,16 +60,22 @@ example は1テーマ1個。増やすときもこの単位を守り、`diagram.h
 エージェント設定は2箇所から来る。どちらも `just apm-install` が `./.claude/` に
 展開する（`apm.yml` 参照）。
 
-- `.apm/` — このプロジェクト固有の知識。`saga-workflows` スキルが、ここでの saga
-  ステップと補償の作り方、および変更が通すべき決定性・冪等性・リトライの
-  チェックリストを扱う。編集・レビュー対象はこのディレクトリで、このリポジトリが
-  自分で書いているエージェント設定はこれだけ。
+- `.apm/` — 知識の出自で4つに割ってある。編集・レビュー対象はこのディレクトリで、
+  このリポジトリが自分で書いているエージェント設定はこれだけ。
+  - `saga-package` — `saga/` パッケージが依存している不変条件と、ステップの足し方
+  - `temporal-review` — 決定性・冪等性・リトライの、出す前のチェックリスト
+  - `gauge-specs` — `docs/specs/` の仕様と `stepImpl/` の書き方
+  - `upstream-docs` — 上流のドキュメントを指すか写すかの基準と、腐りの検出
 - `core-principal` — 共有ハーネス（ルール、git のガードフック、`core-*` スキル）。
   [dotfiles](https://github.com/yamakura-yuma/dotfiles) リポジトリからコミットで
   固定して取得する。変更は向こうで行い、ここでは `apm update` で `ref` を上げる。
   ローカルでフォークしないこと。
 
 他のリポジトリでも同じに読めるものは `.apm/` ではなく `core-principal` に属する。
+`temporal-review` と `upstream-docs` はその線では共有側だが、`core-principal` は
+Temporal と無関係なリポジトリも依存しているので置けない。受け皿ができるまでここに
+置き、本体にはリポジトリ固有のパスを書かないでおく。
+
 `.claude/` と `apm_modules/` は生成物で gitignore してある。
 
 ## graphify

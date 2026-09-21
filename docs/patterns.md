@@ -23,26 +23,39 @@
 
 ```go
 // アクティビティのステップ
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+res, _ := saga.Step(ctx, s, "reserve",
+    saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
 
-// 子ワークフローのステップ
-pack, _ := saga.Step(ctx, s, "pack", PackWorkflow, UnpackWorkflow, PackReq{Order: in})
+// 子ワークフローで実行し、アクティビティで取り消すステップ
+pack, _ := saga.Step(ctx, s, "pack",
+    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
 
 // 外部ワークフローへの signal のステップ
-saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease), HoldReq{SKU: in.SKU})
+saga.Step(ctx, s, "hold",
+    saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{SKU: in.SKU})
 
 // 自分のワークフローコードのステップ
-saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
 ```
 
 混ぜられます。補償のレジストリは executor を区別しないので、巻き戻しは1つの逆順で回ります。
 
+**forward と補償は別々の値なので、片方だけ別の executor にできます。** 上の例は
+`example/childflow/` そのもので、荷造りは自分の履歴を持つに足る長さなので子ワークフロー、
+荷ほどきはアクティビティ1回です。
+
 子ワークフロー側は `saga.IdempotencyKeyOf` で自分の鍵を読みます。鍵は子の `WorkflowID` に
-載っていて、補償側の `:undo` は剥がされた後なので、forward と補償で同じ値になります。
+載っていて、補償側の `:undo` は剥がされた後なので、両側で同じ値になります。アクティビティ側は
+`saga.IdempotencyKey` で、同じ値を読みます。
 
 ```go
-func UnpackWorkflow(ctx workflow.Context, req PackReq) error {
-    key, _ := saga.IdempotencyKeyOf(ctx)   // forward の子と同じ鍵
+func PackWorkflow(ctx workflow.Context, req PackReq) (string, error) {
+    key, _ := saga.IdempotencyKeyOf(ctx)   // 子ワークフロー側
+    ...
+}
+
+func (a *Activities) Unpack(ctx context.Context, req PackReq) error {
+    key, _ := saga.IdempotencyKey(ctx)     // アクティビティ側。同じ値
     ...
 }
 ```
@@ -61,8 +74,10 @@ func UnpackWorkflow(ctx workflow.Context, req PackReq) error {
 渡せます。前段の出力を次段のリクエストに入れるだけ。
 
 ```go
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
+res, _ := saga.Step(ctx, s, "reserve",
+    saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
+chg, _ := saga.Step(ctx, s, "charge",
+    saga.Activity(a.Charge), saga.UndoActivity(a.Refund),
     ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
 ```
 
@@ -104,10 +119,10 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 }
 ```
 
-`saga.Activity` と `saga.ChildWorkflow` は `ctx` と `s` を引数で取るので、メソッドでも関数でも好きに割れます。
+`saga.Step` が `ctx` と `s` を引数で取るので、ステップはメソッドでも関数でも好きに割れます。
 
-**state 構造体そのものを `saga.Activity` に渡すことはできません。** `saga.Activity` の入力はアクティビティの
-引数なので、シリアライズ可能である必要があります。メソッドの中で state からリクエストを
+**state 構造体そのものを `saga.Step` に渡すことはできません。** アクティビティのステップでは
+`in` がそのままアクティビティの引数になるので、シリアライズ可能である必要があります。メソッドの中で state からリクエストを
 組んでください。
 
 クロージャ自体は無くせません。`Run` が最後にロールバックを判断する場所だからです。
@@ -120,7 +135,7 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 その場で呼んでステップに変えます。
 
 ```go
-saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
 ```
 
 判断は `awaitApproval` の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
@@ -148,9 +163,11 @@ saga を失敗させうるもの全般に使えます。`workflow.Await` で条�
 本体はステップの列のままになります。
 
 ```go
-res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
-saga.Step(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
+res, _ := saga.Step(ctx, s, "reserve",
+    saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
+saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: wait})
+chg, _ := saga.Step(ctx, s, "charge",
+    saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in})
 ```
 
 **`s.Err()` のガードは要りません。** ステップが失敗していれば以降のステップは飛ばされ、
@@ -170,10 +187,10 @@ chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, ChargeReq{Order: in})
 打ち消しの signal です。
 
 ```go
-saga.Step(ctx, s, "hold", saga.Func(sendHold, sendRelease),
+saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease),
     HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
 
-// 2つとも普通のワークフローコード。Func に渡せるのはこれで足りる
+// 2つとも普通のワークフローコード。Func / UndoFunc に渡せるのはこれで足りる
 func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
     err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
     return struct{}{}, err

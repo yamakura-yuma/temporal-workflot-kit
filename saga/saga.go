@@ -172,9 +172,9 @@ func (s *Saga) Err() error { return s.err }
 // run unless a later step fails or the body returns an error.
 func (s *Saga) Clear() { s.err = nil }
 
-// Add registers a compensation that is not a plain activity -- a child
-// workflow, a local activity, a signal to another workflow. It is the escape
-// hatch from the four step constructors, for a compensation none of them fits.
+// Add registers a compensation that none of the Undo constructors fits -- a
+// local activity, or anything else that has to be wired by hand. It is the
+// escape hatch from UndoActivity, UndoChildWorkflow and UndoFunc.
 //
 // Register the compensation before starting the work it undoes, for the same
 // reason a step does: an operation that times out may still have taken effect.

@@ -493,7 +493,7 @@ func mixedWorkflow(ctx workflow.Context) ([]string, error) {
 // A step can be a child workflow as well as an activity, and the rollback runs
 // both kinds in one reverse order. Nothing about the registry is per-executor:
 // it holds compensations as plain functions.
-func TestChildStepCompensatesInOneOrder(t *testing.T) {
+func TestChildWorkflowCompensatesInOneOrder(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
 

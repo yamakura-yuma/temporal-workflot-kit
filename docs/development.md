@@ -4,11 +4,12 @@
 ホストからは `just` で叩くだけで、Go を入れる必要はありません。
 
 ```bash
-just ci              # fmt-check, vet, build, ユニットテスト, spec-validate, 仕様
+just ci              # fmt-check, vet, build, ユニットテスト, docs-check, spec-validate, 仕様
 just test            # ユニットテスト（インメモリのテスト環境）
 just spec            # docs/specs/ の仕様（実際の dev server 相手）
 just spec-validate   # 全ステップに実装があるかを、実行せずに確認
 just spec-steps      # どの Go 関数がどのステップを実装しているかの対応表
+just docs-check      # docs のコード例と、上流由来のノートの版
 just shell           # コンテナの対話シェル
 ```
 

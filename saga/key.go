@@ -32,7 +32,8 @@ func IdempotencyKey(ctx context.Context) (key string, ok bool) {
 	return strings.TrimSuffix(id, undoSuffix), true
 }
 
-// IdempotencyKeyOf is IdempotencyKey for a child workflow started by ChildStep.
+// IdempotencyKeyOf is IdempotencyKey for a child workflow started by a step
+// built with ChildWorkflow or UndoChildWorkflow.
 // The key rides in the child's WorkflowID.
 //
 // A forward child and the child that compensates it see the same key, which is

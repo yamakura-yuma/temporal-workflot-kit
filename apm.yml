@@ -12,8 +12,13 @@ targets:
 # Two sources, one deploy. `apm install` here lands both in ./.claude/ (never
 # ~/.claude/):
 #
-#   ./.apm/        this project's own domain knowledge — the saga conventions
-#                  and the review checklist that name this repo's code.
+#   ./.apm/        this project's own domain knowledge, split four ways by where
+#                  the knowledge comes from: saga-package (this saga/ package),
+#                  temporal-review (Temporal in general), gauge-specs (the
+#                  executable spec suite) and upstream-docs (how to cite or
+#                  cache an upstream doc). The last two read the same in any
+#                  repo and carry no repo-specific paths in their bodies, so
+#                  they can move to a shared package once one exists.
 #   core-principal the shared harness (rules, guard hooks, core-* skills) from
 #                  the dotfiles repo, pinned by commit because upstream
 #                  publishes no tags; bump with `apm update`.
