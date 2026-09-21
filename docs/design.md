@@ -224,11 +224,48 @@ func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 
 ### 既定は RunID とステップ名。`KeyFunc` で変えられる
 
-既定の `RunID + ステップ名` が言っているのは「**この試行が一度だけ**」です。run が変われば
-鍵も変わります。
+#### 土台 — Temporal の想定は2層
 
-もう1つ、意味のある作り方があります。`WorkflowID + ステップ名` で、こちらは「**この業務
-操作が一度だけ**」になります。
+鍵の話に入る前に、上流がどう考えているかを置きます。重複の排除は**2箇所**で行う想定に
+なっています。
+
+| | どこで弾くか | 道具 |
+| --- | --- | --- |
+| 層1 | ワークフローが立つ前。Temporal サーバ | WorkflowID と Workflow Id Reuse / Conflict Policy |
+| 層2 | アクティビティの中 | 冪等キー（RunID + ActivityID） |
+
+層1では、WorkflowID は業務識別子として扱われます。公式は WorkflowID を
+"meant to be a business-process identifier"（注文番号や顧客番号のようなもの）と位置づけ、
+"Temporal guarantees that there can be at most one Workflow Execution with a given ID
+running at any point in time" としています
+（[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
+
+層2では、冪等キーの作り方まで名指しされています。"You can use a combination of the
+Workflow Run ID and the Activity ID as an idempotency key" で、理由は "this is guaranteed
+to be consistent across retry attempts but unique among Workflow Executions"
+（[Activity definition](https://docs.temporal.io/activity-definition)）。
+
+#### 既定は発明ではなく、公式推奨そのもの
+
+`DefaultKey` は `RunID + "/" + ステップ名` を作り、それをそのステップの `ActivityID` に
+設定します。読み替えると **RunID + ActivityID** で、上の層2の推奨そのものです。ここは
+このライブラリが決めたことではありません。
+
+1点だけ公式より進んでいます。**公式の言い方を素朴に取って `ActivityID` を明示しないと、
+SDK が振るのは ScheduleID 由来の10進連番です。** ステップを1つ挿入すると、それ以降の番号が
+全部ずれます。「retry を跨いで一定」は満たしても、「コードを1行足すと変わらない」は満たし
+ません（出典は [上流由来のノート](sdk-notes.md) の `ActivityID` の行）。
+
+このライブラリは `ActivityID` を自分で決定的に決めることでそこを塞いでいます。ステップ名は
+順番を入れ替えても挿入しても変わらないので、連番のずれが起きません。**公式推奨に合わせた
+うえで、素朴に取ると踏む穴を1つ埋めた**、というのが既定の位置づけです。
+
+既定が言っているのは「**この試行が一度だけ**」です。run が変われば鍵も変わります。
+
+#### WorkflowID を鍵にする案は、公式の想定では層1の道具
+
+もう1つの作り方が `WorkflowID + ステップ名` で、こちらは「**この業務操作が一度だけ**」に
+なります。
 
 ```go
 saga.Options{
@@ -238,9 +275,21 @@ saga.Options{
 }
 ```
 
-**WorkflowID に API の Request ID（API コールごとに一意な ID）を入れる設計なら、これが
-そのまま業務上の冪等キーになります。** 「この注文リクエストの課金は一度だけ」が、鍵の形
-そのもので言えている状態です。推奨できる選択肢です。
+ただし、**二重送信を止めたいだけなら層2まで下りてくる必要はありません。** WorkflowID に
+API の Request ID（コールごとに一意な ID）を入れて Reuse / Conflict Policy を設定すれば、
+重複したリクエストは**ワークフローが立つ前に**サーバが弾きます。それが層1の仕事です。
+二重送信はそこで既に解決しているので、その目的のためだけに層2の鍵まで WorkflowID 由来に
+する理由はありません。
+
+層2まで WorkflowID 由来にして初めて塞がるのは、**同じ WorkflowID の中で run が変わる場合**
+だけです。つまり workflow の retry、reset、continue-as-new。層1は「同じ WorkflowID の
+ワークフローは同時に1本」までしか言っておらず、その1本の中で run が代わることは止めません。
+
+公式も Run Id については、"can change during Workflow Retry"、"you shouldn't rely on the
+current Run Id in your code to make logical choices" と注意しています
+（[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
+既定の鍵はまさにその Run Id に乗っているので、**この注意が当たる場面が、後で見る「ワーカーが
+落ちて補償が走らないまま retry したとき」です。**
 
 #### 条件は1つ。鍵の粒度が業務操作の粒度と一致すること
 
@@ -325,8 +374,9 @@ WorkflowID を鍵にするなら、**同じ WorkflowID で2本目の run が立�
   を振るので、数字だけの鍵は無関係なアクティビティとぶつかります。Request ID が数字だけ
   でも `+ "/" + ステップ名` が付くので、この制約は満たします
 
-連番（1番目、2番目...）は決定的ですが、ステップを1つ挿入すると**それ以降の番号が全部
-ずれ**ます。ステップ名なら、順番を入れ替えても変わりません。
+3つ目は、SDK 既定の連番と同じ穴です。自分で連番（1番目、2番目...）を振る案も、決定的では
+ありますが同じ理由で駄目で、ステップを1つ挿入すると以降が全部ずれます。ステップ名なら、
+挿入しても順番を入れ替えても変わりません。
 
 もう一度書くと、条件は**鍵の粒度が業務操作の粒度と一致していること**、それだけです。既定の
 `RunID` は、何が入っているか分からない値を避けて、粒度を判定できるほうを選んだ結果です。
