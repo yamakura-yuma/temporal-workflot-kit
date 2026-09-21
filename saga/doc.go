@@ -7,10 +7,11 @@
 //
 //	func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 //	    ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-//	        StartToCloseTimeout: 10 * time.Second,
+//	        StartToCloseTimeout:    10 * time.Second,
+//	        ScheduleToCloseTimeout: time.Minute, // compensations need this; see below
 //	    })
 //
-//	    return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: 10 * time.Minute},
+//	    return saga.RunOrCompensate(ctx, saga.Options{},
 //	        func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 //	            w := &fulfillment{in: in}
 //
@@ -59,6 +60,13 @@
 // context, and what you do with the result.
 //
 // # What you still have to do yourself
+//
+// Bound your compensations. They run on a context nothing can cancel from the
+// outside -- that is the point of disconnecting it -- so a compensation that
+// keeps failing has nothing to stop it. Temporal's default retry policy is
+// unlimited attempts and relies on ScheduleToCloseTimeout to stop, so set that
+// on the context before calling RunOrCompensate. StartToCloseTimeout alone
+// bounds one attempt and not the retries.
 //
 // Idempotency keys are yours. StepKey derives a value unique to one step of one
 // run; put it in the request you send, because only the service you call can

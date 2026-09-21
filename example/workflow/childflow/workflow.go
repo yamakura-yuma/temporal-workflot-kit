@@ -44,10 +44,13 @@ type Receipt struct {
 func ChildflowWorkflow(ctx workflow.Context, in activity.Order) (Receipt, error) {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+		// A compensation runs on a context nothing can cancel, so bound it here:
+		// without ScheduleToCloseTimeout the default retry policy is unlimited.
+		ScheduleToCloseTimeout: time.Minute,
+		RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
-	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			w := &fulfillment{in: in, packKey: saga.StepKey(ctx, "pack")}
 
@@ -113,7 +116,10 @@ func (w *fulfillment) cancelShipment(ctx workflow.Context) error {
 func PackWorkflow(ctx workflow.Context, req activity.PackReq) (string, error) {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+		// A compensation runs on a context nothing can cancel, so bound it here:
+		// without ScheduleToCloseTimeout the default retry policy is unlimited.
+		ScheduleToCloseTimeout: time.Minute,
+		RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
 	var id string

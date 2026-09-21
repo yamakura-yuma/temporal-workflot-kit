@@ -14,7 +14,7 @@ trap 'rm -f "$tmp"' EXIT
 #
 #    docs/design.md と docs/activity-contract.md は別の作業で書き換え中なので、
 #    いまは対象外。書き換えが終わったらこの除外を消すこと。
-gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc)\(|\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|KeyFunc)\b|\bsaga\.Run\(|\bsaga\.Step\('
+gone='saga\.(Activity|UndoActivity|ChildWorkflow|UndoChildWorkflow|Func|UndoFunc)\(|\b(UndoActivity|UndoChildWorkflow|UndoFunc|IdempotencyKeyOf|IdempotencyKey|DefaultKey|KeyFunc|CompensationBudget|RemainingBudget|AwaitSignal)\b|\bsaga\.Run\(|\bsaga\.Step\('
 
 grep -rnE "$gone" docs .apm README.md \
   | grep -v '^docs/design\.md:' \

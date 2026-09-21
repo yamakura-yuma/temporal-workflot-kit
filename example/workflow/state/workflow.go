@@ -97,7 +97,10 @@ type Receipt struct {
 func activityOptions() workflow.ActivityOptions {
 	return workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+		// A compensation runs on a context nothing can cancel, so bound it here:
+		// without ScheduleToCloseTimeout the default retry policy is unlimited.
+		ScheduleToCloseTimeout: time.Minute,
+		RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
 	}
 }
 
@@ -106,7 +109,7 @@ func activityOptions() workflow.ActivityOptions {
 func StateWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions())
 
-	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			w := &fulfillment{in: in}
 

@@ -3,7 +3,6 @@ package saga
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
@@ -19,16 +18,6 @@ const undoSuffix = ":undo"
 
 // Options configures a saga.
 type Options struct {
-	// CompensationBudget bounds the whole compensation phase. It is required:
-	// compensations run on a disconnected context that nothing can cancel from
-	// the outside, so without a budget a stuck compensation hangs the workflow
-	// forever. Any compensation left when the budget runs out is reported as
-	// skipped rather than silently dropped.
-	//
-	// It bounds the sequence, not each call. A compensation that wants its own
-	// timeout narrowed to what is left can ask RemainingBudget.
-	CompensationBudget time.Duration
-
 	// StopOnCompensationError stops the compensation phase at the first
 	// failure. The default (false) runs the remaining compensations anyway,
 	// which is usually what you want: one refund failing is no reason to leave
@@ -84,10 +73,7 @@ type undo struct {
 func RunOrCompensate[T any](ctx workflow.Context, o Options, body func(workflow.Context, *Saga) (T, error)) (T, error) {
 	var zero T
 
-	s, err := newSaga(o)
-	if err != nil {
-		return zero, err
-	}
+	s := newSaga(o)
 
 	out, err := body(ctx, s)
 
@@ -115,12 +101,8 @@ func RunOrCompensate[T any](ctx workflow.Context, o Options, body func(workflow.
 	return zero, s.compensate(ctx, err)
 }
 
-func newSaga(o Options) (*Saga, error) {
-	if o.CompensationBudget <= 0 {
-		return nil, fmt.Errorf("saga: Options.CompensationBudget must be positive")
-	}
-
-	return &Saga{opts: o, names: map[string]struct{}{}}, nil
+func newSaga(o Options) *Saga {
+	return &Saga{opts: o, names: map[string]struct{}{}}
 }
 
 // StepKey derives a value unique to one step of one workflow run, which is what
@@ -191,7 +173,6 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 	dctx, cancel := workflow.NewDisconnectedContext(ctx)
 	defer cancel()
 
-	deadline := workflow.Now(dctx).Add(s.opts.CompensationBudget)
 	logger := workflow.GetLogger(ctx)
 
 	var failed, skipped []string
@@ -200,13 +181,7 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 	for i := len(s.undos) - 1; i >= 0; i-- {
 		u := s.undos[i]
 
-		remaining := deadline.Sub(workflow.Now(dctx))
-		if remaining <= 0 {
-			skipped = append(skipped, u.name)
-			continue
-		}
-
-		if err := u.run(withBudget(dctx, remaining)); err != nil {
+		if err := u.run(dctx); err != nil {
 			logger.Error("saga: compensation failed", "step", u.name, "error", err)
 			failed = append(failed, u.name)
 			if first == nil {
@@ -226,27 +201,6 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 	}
 	s.markNeedsAttention(ctx, logger)
 	return newCompensationError(cause, failed, skipped, first)
-}
-
-type budgetKey struct{}
-
-// withBudget carries the remaining compensation budget so a compensation can
-// read it with RemainingBudget.
-func withBudget(ctx workflow.Context, remaining time.Duration) workflow.Context {
-	return workflow.WithValue(ctx, budgetKey{}, remaining)
-}
-
-// RemainingBudget reports how much of the compensation budget is left, and
-// whether there is a budget at all. It returns false outside the compensation
-// phase.
-//
-// The library does not shorten anything for you. A compensation that could
-// outlast the rollback it belongs to should read this and clamp its own
-// ScheduleToCloseTimeout, or the budget only decides whether the next
-// compensation is started, not how long this one may take.
-func RemainingBudget(ctx workflow.Context) (time.Duration, bool) {
-	d, ok := ctx.Value(budgetKey{}).(time.Duration)
-	return d, ok
 }
 
 func (s *Saga) markNeedsAttention(ctx workflow.Context, logger log.Logger) {

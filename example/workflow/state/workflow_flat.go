@@ -1,8 +1,6 @@
 package state
 
 import (
-	"time"
-
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
@@ -30,7 +28,7 @@ import (
 func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions())
 
-	return saga.RunOrCompensate(ctx, saga.Options{CompensationBudget: time.Minute},
+	return saga.RunOrCompensate(ctx, saga.Options{},
 		func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 			var reservation, charge, approvedBy, packing, shipment string
 

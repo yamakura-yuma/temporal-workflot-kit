@@ -59,10 +59,13 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 	// under them; a step that wants its own says so inside its own method.
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+		// A compensation runs on a context nothing can cancel, so bound it here:
+		// without ScheduleToCloseTimeout the default retry policy is unlimited.
+		ScheduleToCloseTimeout: time.Minute,
+		RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
-	opts := saga.Options{CompensationBudget: time.Minute}
+	opts := saga.Options{}
 	if in.MarkAttribute {
 		opts.CompensationFailedAttribute = &CompensationFailedAttribute
 	}

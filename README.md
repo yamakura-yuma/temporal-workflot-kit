@@ -45,11 +45,11 @@ func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 ```go
 func OrderWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
     ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-        StartToCloseTimeout: 10 * time.Second,
+        StartToCloseTimeout:    10 * time.Second,
+        ScheduleToCloseTimeout: time.Minute,   // 補償はこれが無いと無制限にリトライする
     })
 
     return saga.RunOrCompensate(ctx, saga.Options{
-        CompensationBudget: 5 * time.Minute,
     }, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
         w := &fulfillment{in: in}
 
@@ -159,8 +159,8 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 
-`CompensationBudget` は必須です。補償は外から誰もキャンセルできない context で走るので、
-上限が無いと詰まったときに止める手段がありません。詳細は `go doc ./saga`。
+補償は外から誰もキャンセルできない context で走ります。**`ScheduleToCloseTimeout` を必ず
+設定してください。** Temporal の既定のリトライは無制限で、止めるのはこれだけです。
 
 ## 貢献方法
 

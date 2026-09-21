@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
@@ -100,17 +99,11 @@ type plan struct {
 	SleepAfter int `json:"sleep_after"`
 	// ReturnNil makes the body return a nil error even when a step failed,
 	// i.e. the caller forgot to check.
-	ReturnNil bool          `json:"return_nil"`
-	Budget    time.Duration `json:"budget"`
+	ReturnNil bool `json:"return_nil"`
 }
 
 func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 	var a *acts // nil receiver: only the method's name is used
-
-	budget := p.Budget
-	if budget == 0 {
-		budget = 5 * time.Minute
-	}
 
 	// One attempt per activity: these tests assert on the exact sequence of
 	// calls, and the SDK's default retry policy would repeat the failures.
@@ -119,9 +112,7 @@ func planWorkflow(ctx workflow.Context, p plan) ([]string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.RunOrCompensate(ctx, saga.Options{
-		CompensationBudget: budget,
-	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		var out []string
 		for i, spec := range p.Steps {
 			in := req{Step: spec.Name, Fail: spec.Fail}
@@ -365,49 +356,6 @@ func TestCompensationFailureKeepsTypeAndCause(t *testing.T) {
 		"a failing compensation must not stop the ones still queued")
 }
 
-// When the compensation budget runs out, the compensations that never ran are
-// reported rather than silently dropped.
-func TestBudgetExhaustionReportsSkippedSteps(t *testing.T) {
-	env, r := newEnv(t)
-
-	// The compensation for "b" takes longer than the whole budget, leaving
-	// nothing for "a".
-	//
-	// In production each compensation's ScheduleToCloseTimeout is also clamped
-	// to the remaining budget, so one of them cannot run past it; the test
-	// environment does not apply that timeout to a delayed mock, so what this
-	// test pins is the accounting -- a compensation that never ran is reported,
-	// not dropped.
-	env.OnActivity("Undo", mock.Anything, mock.Anything).
-		After(10 * time.Minute).
-		Return(nil)
-
-	env.ExecuteWorkflow(planWorkflow, plan{
-		Steps:      []stepSpec{{Name: "a"}, {Name: "b", Fail: true}},
-		SleepAfter: -1,
-		Budget:     time.Minute,
-	})
-
-	require.True(t, env.IsWorkflowCompleted())
-	err := env.GetWorkflowError()
-	require.Error(t, err)
-
-	var appErr *temporal.ApplicationError
-	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %T: %v", err, err)
-	require.Equal(t, saga.CompensationFailedType, appErr.Type())
-
-	var report saga.CompensationReport
-	require.NoError(t, appErr.Details(&report))
-	require.Equal(t, []string{"a"}, report.Skipped, "a's compensation should be reported, not dropped")
-	require.Empty(t, report.Failed)
-
-	// The failure that started the rollback is still the cause.
-	require.Contains(t, err.Error(), "forward failed: b")
-
-	calls, _ := r.snapshot()
-	require.Equal(t, []string{"do:a", "do:b"}, calls, "the mocked compensation replaces the real one")
-}
-
 // A step with no compensation is allowed, and leaves nothing to undo.
 func TestStepWithoutCompensation(t *testing.T) {
 	env, r := newEnv(t)
@@ -438,24 +386,6 @@ func TestDuplicateStepNameFails(t *testing.T) {
 	err := env.GetWorkflowError()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate step name")
-}
-
-// A saga needs a compensation budget: compensations run on a context nothing
-// can cancel from outside, so without one a stuck compensation hangs forever.
-func TestBudgetIsRequired(t *testing.T) {
-	var ts testsuite.WorkflowTestSuite
-	env := ts.NewTestWorkflowEnvironment()
-
-	noBudget := func(ctx workflow.Context) error {
-		_, err := saga.RunOrCompensate(ctx, saga.Options{},
-			func(workflow.Context, *saga.Saga) (int, error) { return 0, nil })
-		return err
-	}
-	env.RegisterWorkflow(noBudget)
-	env.ExecuteWorkflow(noBudget)
-
-	require.True(t, env.IsWorkflowCompleted())
-	require.ErrorContains(t, env.GetWorkflowError(), "CompensationBudget")
 }
 
 // --- child workflow steps ----------------------------------------------------
@@ -504,9 +434,7 @@ func mixedWorkflow(ctx workflow.Context) ([]string, error) {
 		}
 	}
 
-	return saga.RunOrCompensate(ctx, saga.Options{
-		CompensationBudget: 5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) ([]string, error) {
 		s.Step(ctx, "a", act(a.Do, req{Step: "a"}), act(a.Undo, req{Step: "a"}))
 		s.Step(ctx, "b", child(childDo, req{Step: "b"}), child(childUndo, req{Step: "b"}))
 		s.Step(ctx, "c", act(a.Do, req{Step: "c", Fail: true}), act(a.Undo, req{Step: "c"}))
@@ -587,9 +515,7 @@ func awaitWorkflow(ctx workflow.Context, failFirst bool) (string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.RunOrCompensate(ctx, saga.Options{
-		CompensationBudget: 5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		if failFirst {
 			s.Step(ctx, "a",
 				func(ctx workflow.Context) error {
@@ -662,9 +588,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: once})
 
-	return saga.RunOrCompensate(ctx, saga.Options{
-		CompensationBudget: 5 * time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
+	return saga.RunOrCompensate(ctx, saga.Options{}, func(ctx workflow.Context, s *saga.Saga) (string, error) {
 		s.Step(ctx, "reserve",
 			func(ctx workflow.Context) error {
 				return workflow.ExecuteActivity(ctx, a.Do, req{Step: "reserve", Fail: true}).Get(ctx, nil)

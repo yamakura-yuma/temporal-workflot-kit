@@ -64,6 +64,26 @@ ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 **ローカルアクティビティも書けます。** ただし取り消しが要る副作用を置く場所ではありません。
 リトライがワークフロータスク内で完結してサーバに残らないためです。
 
+### 補償のタイムアウト
+
+**補償は `workflow.NewDisconnectedContext` の上で走るので、外から誰も止められません。**
+forward なら「ワークフローをキャンセルすれば止まる」が、補償では効きません。切り離すことが
+目的なので、これは仕様です。
+
+だから `ScheduleToCloseTimeout` を必ず設定してください。**Temporal の既定のリトライは
+無制限**で、止めるのは `ScheduleToCloseTimeout` だけです（SDK の `RetryPolicy` 自身が
+そう書いています。[sdk-notes.md](sdk-notes.md)）。`StartToCloseTimeout` は1回の試行を
+縛るだけで、リトライの繰り返しは縛りません。
+
+```go
+ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+    StartToCloseTimeout:    10 * time.Second,  // 1回の試行
+    ScheduleToCloseTimeout: time.Minute,       // リトライ込みの上限。補償ではこれが要る
+})
+```
+
+ライブラリはここに介入しません。普通の Temporal の設定で足りるからです。
+
 ### 冪等キー
 
 ライブラリは冪等キーを渡しません。`saga.StepKey(ctx, "charge")` が「1回の実行の1ステップ」に
