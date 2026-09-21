@@ -47,9 +47,11 @@ type Options struct {
 	// RunID + "/" + name, which means "this attempt happens once".
 	//
 	// WorkflowExecution.ID + "/" + name means "this business operation happens
-	// once" instead, and is the better choice when the workflow carries a retry
-	// policy or its ID is a request ID. See docs/design.md for the trade-off
-	// and for the WorkflowIDReusePolicy that goes with it.
+	// once" instead. The only condition on a key is that its grain match the
+	// grain of the business operation, so use it when the WorkflowID has that
+	// grain -- a per-request ID does; an ID reused across several workflows,
+	// such as an order ID or a cron schedule, is coarser, and every step of the
+	// second workflow would be skipped. See docs/design.md.
 	//
 	// It must be deterministic: the same workflow run must produce the same key
 	// for the same step name on replay. Do not key on FirstRunID -- it is
