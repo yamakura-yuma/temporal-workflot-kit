@@ -61,10 +61,22 @@ stepImpl/steps.go
 | パス | 中身 |
 | --- | --- |
 | `saga/` | ライブラリ本体とユニットテスト |
-| `docs/specs/` | 実行される仕様 |
-| `stepImpl/` | そのステップの実装と、サーバとワーカーを起動するスイートフック |
+| `docs/specs/` | 実行される仕様。結合テストの本体 |
+| `stepImpl/` | 仕様文と Go を繋ぐ語彙層。そのステップの実装と、サーバとワーカーを起動するスイートフック |
 | `example/*/` | 仕様が動かす saga。1テーマ1 example（order / pipeline / state / childflow / approval） |
 | `manifest.json`、`env/` | Gauge の設定。プロジェクトルートに置く必要がある |
+
+結合テストは `docs/specs/` の仕様・`stepImpl/` のステップ実装・スイートが起動する実際の
+dev server の3つで成り立ちます。押さえたい振る舞いは仕様の側に書き、`stepImpl/` は
+その文を Go に繋ぐだけに留めてください。
+
+`stepImpl/` という名前は gauge-go の既定で、このリポジトリの発明ではありません
+（[`constants/gauge.go` の `DefaultStepImplDir`](https://github.com/getgauge-contrib/gauge-go/blob/v0.5.2/constants/gauge.go#L4)。`gauge init go` がこの名前で作ります）。
+ランナーは名前を見ていないので改名しても動きます
+（[`gauge/builder.go` の `LoadGaugeImpls`](https://github.com/getgauge-contrib/gauge-go/blob/v0.5.2/gauge/builder.go#L20) が
+`go build ./...` と `go list ./...` でモジュールの全パッケージを生成した main に import
+するため）。それでも既定のままにしてあるのは、他の Gauge プロジェクトと同じ読み方が
+できるようにするためです。
 
 `example/order/` が通常パッケージなのは、Gauge がテストバイナリではなくモジュールを
 ビルドするからです。`_test.go` に置くと、ステップ実装から見えません。

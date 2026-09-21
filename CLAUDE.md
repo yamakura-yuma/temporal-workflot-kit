@@ -19,12 +19,14 @@ Temporal のワークフローを書くための Go の部品集。今入って�
   example への索引）、`activity-contract.md`（アクティビティ側の契約と、塞げていない
   こと）、`development.md`（開発手順）、`sdk-notes.md`（Temporal SDK のソースを読んで
   得た事実の出自と、その版）
-- `docs/specs/` — Gauge の markdown で書かれた実行される仕様。日本語。スイートが
-  プロセス内に起動する実際の Temporal dev server に対して実行する。コードとの
-  対応づけはステップ文が `gauge.Step(...)` の文字列と一致することだけ。場所は
-  `env/default/default.properties` の `gauge_specs_dir` で決まる（コマンドライン
-  引数では変わらない）
-- `stepImpl/` — そのステップの Go 実装と、サーバとワーカーを起動するスイートフック
+- `docs/specs/` — Gauge の markdown で書かれた実行される仕様。日本語。結合テストの
+  本体はこちら。スイートがプロセス内に起動する実際の Temporal dev server に対して
+  実行する。コードとの対応づけはステップ文が `gauge.Step(...)` の文字列と一致する
+  ことだけ。場所は `env/default/default.properties` の `gauge_specs_dir` で決まる
+  （コマンドライン引数では変わらない）
+- `stepImpl/` — 仕様文と Go を繋ぐ語彙層。そのステップの Go 実装と、サーバとワーカーを
+  起動するスイートフック。名前は gauge-go の既定（`gauge init go` が作る）で、この
+  リポジトリの発明ではない。理由は `docs/development.md`「置き場所」
 - `example/order/` — 仕様が動かす saga（reserve, charge, ship）。アクティビティ側の
   契約の実装例でもある。Gauge はテストバイナリではなくモジュールをビルドするので、
   通常パッケージに置く
