@@ -42,7 +42,10 @@ import (
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
 	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
@@ -158,7 +161,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 		}
 
 		deadline := time.Now().Add(30 * time.Second)
-		for !s.order.Held(run.GetRunID(), step) {
+		for !order.Held(s.order, run.GetRunID(), step) {
 			if time.Now().After(deadline) {
 				return fmt.Errorf("%q never ran, so there is nothing to cancel", step)
 			}
@@ -284,7 +287,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 		for _, step := range split(steps) {
-			if !s.order.Held(run.GetRunID(), step) {
+			if !order.Held(s.order, run.GetRunID(), step) {
 				return fmt.Errorf("%q should still be held, but it is not", step)
 			}
 		}
@@ -298,8 +301,10 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 		for _, step := range split(steps) {
-			if s.order.Held(run.GetRunID(), step) || s.pipeline.Held(run.GetRunID(), step) ||
-				s.childflow.Held(run.GetRunID(), step) || s.state.Held(run.GetRunID(), step) {
+			if order.Held(s.order, run.GetRunID(), step) ||
+				pipeline.Held(s.pipeline, run.GetRunID(), step) ||
+				childflow.Held(s.childflow, run.GetRunID(), step) ||
+				state.Held(s.state, run.GetRunID(), step) {
 				return fmt.Errorf("%q is still held, so it was not rolled back", step)
 			}
 		}

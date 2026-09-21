@@ -71,8 +71,8 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 
-		pack := s.childflow.KeySeenBy("pack")
-		unpack := s.childflow.KeySeenBy("unpack")
+		pack := childflow.KeySeenBy(s.childflow, "pack")
+		unpack := childflow.KeySeenBy(s.childflow, "unpack")
 
 		if pack == "" {
 			return errors.New("梱包の子が冪等キーを読めていません")

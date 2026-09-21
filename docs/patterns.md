@@ -13,7 +13,7 @@
 | `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行。素の形との読み比べは [`workflow_flat.go`](../example/state/workflow_flat.go) | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
 | signal を待つには | `saga.Func` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
 | signal を送るステップは書けるか | 書ける。`saga.Func` で。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
-| 基本形 | 3ステップと補償、冪等キーを行の主キーにするアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
+| 基本形 | 3ステップと補償、冪等キーを呼び先に渡すアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
 
 ---
 

@@ -124,7 +124,7 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 
 | 例 | 何を見せているか | 図 |
 | --- | --- | --- |
-| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを行の主キーにするアクティビティの書き方 | [図](example/order/diagram.html) |
+| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを呼び先に渡すアクティビティの書き方 | [図](example/order/diagram.html) |
 | [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/pipeline/diagram.html) |
 | [`example/state/`](example/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/state/diagram.html) |
 | [`example/childflow/`](example/childflow/) | 子ワークフローで実行し、アクティビティで取り消すステップ。冪等キーは executor を跨いで同じ | [図](example/childflow/diagram.html) |

@@ -45,16 +45,16 @@ const holdEnv = "SPEC_HOLD"
 // specsDir is where the .feature files live, relative to this package.
 const specsDir = "../docs/specs"
 
-// suite is what the whole run shares. The workers hold these service instances
-// for their lifetime, so the services cannot be per-scenario; handing them to
+// suite is what the whole run shares. The workers hold these activity
+// instances for their lifetime, so they cannot be per-scenario; handing them to
 // each scenario through its context is what keeps them out of package-level
 // variables.
 type suite struct {
 	client    client.Client
-	order     *order.Services
-	pipeline  *pipeline.Services
-	childflow *childflow.Services
-	state     *state.Services
+	order     *order.Activities
+	pipeline  *pipeline.Activities
+	childflow *childflow.Activities
+	state     *state.Activities
 }
 
 // suiteRun is the one piece of package-level state left: what TestMain has to
@@ -112,7 +112,7 @@ func TestFeatures(t *testing.T) {
 			Strict:   true,
 			TestingT: t,
 			// Concurrency stays at the default 1. The scenarios share one set of
-			// services and one dev server, so they cannot run in parallel.
+			// activity instances and one dev server, so they cannot run in parallel.
 		},
 	}
 
@@ -178,15 +178,11 @@ func startSuite() (*suiteRun, error) {
 
 	r.suite = &suite{
 		client:    r.devServer.Client(),
-		order:     order.NewServices(),
-		pipeline:  pipeline.NewServices(),
-		childflow: childflow.NewServices(),
-		state:     state.NewServices(),
+		order:     order.NewActivities(),
+		pipeline:  pipeline.NewActivities(),
+		childflow: childflow.NewActivities(),
+		state:     state.NewActivities(),
 	}
-
-	// The order example's activities are shared with the approval example, so
-	// both call the same services.
-	orderActivities := order.NewActivities(r.suite.order)
 
 	start := func(name string, register func(w worker.Worker)) error {
 		w := worker.New(r.suite.client, name, worker.Options{})
@@ -200,7 +196,7 @@ func startSuite() (*suiteRun, error) {
 
 	if err := start(order.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(order.OrderWorkflow)
-		w.RegisterActivity(orderActivities)
+		w.RegisterActivity(r.suite.order)
 	}); err != nil {
 		return r, err
 	}
@@ -209,14 +205,14 @@ func startSuite() (*suiteRun, error) {
 	// worker.
 	if err := start(approval.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(approval.ApprovalWorkflow)
-		w.RegisterActivity(orderActivities)
+		w.RegisterActivity(r.suite.order)
 	}); err != nil {
 		return r, err
 	}
 
 	if err := start(pipeline.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(pipeline.PipelineWorkflow)
-		w.RegisterActivity(pipeline.NewActivities(r.suite.pipeline))
+		w.RegisterActivity(r.suite.pipeline)
 	}); err != nil {
 		return r, err
 	}
@@ -226,7 +222,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(childflow.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(childflow.ChildflowWorkflow)
 		w.RegisterWorkflow(childflow.PackWorkflow)
-		w.RegisterActivity(childflow.NewActivities(r.suite.childflow))
+		w.RegisterActivity(r.suite.childflow)
 	}); err != nil {
 		return r, err
 	}
@@ -237,7 +233,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(state.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(state.StateWorkflow)
 		w.RegisterWorkflow(state.FlatWorkflow)
-		w.RegisterActivity(state.NewActivities(r.suite.state))
+		w.RegisterActivity(r.suite.state)
 	}); err != nil {
 		return r, err
 	}
@@ -245,7 +241,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(external.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(external.ExternalWorkflow)
 		w.RegisterWorkflow(external.InventoryWorkflow)
-		w.RegisterActivity(external.NewActivities(external.NewServices()))
+		w.RegisterActivity(external.NewActivities())
 	}); err != nil {
 		return r, err
 	}

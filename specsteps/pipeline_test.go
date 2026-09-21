@@ -28,7 +28,7 @@ func registerPipelineSteps(sc *godog.ScenarioContext) {
 			if _, err := s.outcome(); err != nil {
 				return err
 			}
-			if got := s.pipeline.Upstream(step); got != upstream {
+			if got := pipeline.Upstream(s.pipeline, step); got != upstream {
 				return fmt.Errorf("補償 %q が受け取った前段の ID: got %q, want %q", step, got, upstream)
 			}
 			return nil
