@@ -12,7 +12,7 @@ import (
 	"github.com/cucumber/godog"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/external"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/external"
 )
 
 func registerExternalSteps(sc *godog.ScenarioContext) {
@@ -86,13 +86,9 @@ func (s *scenarioState) startExternal(id, failAt string) error {
 		return errors.New("在庫ワークフローが起動されていません")
 	}
 
-	in := external.Order{
-		ID:        id,
+	in := external.Request{
+		Order:     sampleLine(id, failAt),
 		Inventory: s.inventory.GetID(),
-		SKU:       "widget",
-		Quantity:  2,
-		Amount:    4200,
-		FailAt:    failAt,
 	}
 
 	run, err := s.client.ExecuteWorkflow(context.Background(),

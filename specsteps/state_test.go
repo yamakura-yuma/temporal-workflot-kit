@@ -10,7 +10,7 @@ import (
 	"github.com/cucumber/godog"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/state"
 )
 
 func registerStateSteps(sc *godog.ScenarioContext) {

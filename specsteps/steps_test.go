@@ -42,10 +42,8 @@ import (
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/order"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
@@ -128,27 +126,33 @@ func (s *scenarioState) scheduledSteps() ([]string, error) {
 	return steps, nil
 }
 
+// sampleLine is the order every specification starts from: one widget, one
+// price, and a step to fail at when the scenario wants one. The examples that
+// need more of their own build it into their own input type.
+func sampleLine(id, failAt string) activity.Order {
+	return activity.Order{ID: id, SKU: "widget", Quantity: 2, Amount: 4200, FailAt: failAt}
+}
+
 func registerRollbackSteps(sc *godog.ScenarioContext) {
 	// --- starting a saga -----------------------------------------------------
 
 	sc.Step(`^注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).start(order.Order{ID: id, SKU: "widget", Amount: 4200})
+		return stateOf(ctx).start(order.Request{Order: sampleLine(id, "")})
 	})
 
 	sc.Step(`^"([^"]*)" で失敗する注文 "([^"]*)"$`, func(ctx context.Context, step, id string) error {
-		return stateOf(ctx).start(order.Order{ID: id, SKU: "widget", Amount: 4200, FailAt: step})
+		return stateOf(ctx).start(order.Request{Order: sampleLine(id, step)})
 	})
 
 	sc.Step(`^課金の後で待機する注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).start(order.Order{ID: id, SKU: "widget", Amount: 4200, HoldSeconds: 120})
+		return stateOf(ctx).start(order.Request{Order: sampleLine(id, ""), HoldSeconds: 120})
 	})
 
 	sc.Step(`^"([^"]*)" で失敗し、"([^"]*)" を取り消せない注文 "([^"]*)"$`,
 		func(ctx context.Context, step, undoStep, id string) error {
-			return stateOf(ctx).start(order.Order{
-				ID: id, SKU: "widget", Amount: 4200,
-				FailAt: step, FailUndo: undoStep, MarkAttribute: true,
-			})
+			in := order.Request{Order: sampleLine(id, step), MarkAttribute: true}
+			in.Order.FailUndo = undoStep
+			return stateOf(ctx).start(in)
 		})
 
 	// --- driving a saga ------------------------------------------------------
@@ -161,7 +165,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 		}
 
 		deadline := time.Now().Add(30 * time.Second)
-		for !order.Held(s.order, run.GetRunID(), step) {
+		for !activity.Held(s.acts, run.GetRunID(), step) {
 			if time.Now().After(deadline) {
 				return fmt.Errorf("%q never ran, so there is nothing to cancel", step)
 			}
@@ -287,7 +291,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 		for _, step := range split(steps) {
-			if !order.Held(s.order, run.GetRunID(), step) {
+			if !activity.Held(s.acts, run.GetRunID(), step) {
 				return fmt.Errorf("%q should still be held, but it is not", step)
 			}
 		}
@@ -301,10 +305,7 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 		for _, step := range split(steps) {
-			if order.Held(s.order, run.GetRunID(), step) ||
-				pipeline.Held(s.pipeline, run.GetRunID(), step) ||
-				childflow.Held(s.childflow, run.GetRunID(), step) ||
-				state.Held(s.state, run.GetRunID(), step) {
+			if activity.Held(s.acts, run.GetRunID(), step) {
 				return fmt.Errorf("%q is still held, so it was not rolled back", step)
 			}
 		}
@@ -312,9 +313,9 @@ func registerRollbackSteps(sc *godog.ScenarioContext) {
 	})
 }
 
-func (s *scenarioState) start(in order.Order) error {
+func (s *scenarioState) start(in order.Request) error {
 	run, err := s.client.ExecuteWorkflow(context.Background(),
-		client.StartWorkflowOptions{ID: "saga-" + in.ID, TaskQueue: order.TaskQueue},
+		client.StartWorkflowOptions{ID: "saga-" + in.Order.ID, TaskQueue: order.TaskQueue},
 		order.OrderWorkflow, in)
 	if err != nil {
 		return fmt.Errorf("could not start the saga: %w", err)

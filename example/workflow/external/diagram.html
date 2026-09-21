@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>state — Run の中を短く保つ — temporal-workflow-kit example</title>
+<title>external — signal で他のワークフローを動かす — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -75,10 +75,10 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="diagram.html" class="here">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="diagram.html" class="here">external</a></nav>
 
-<h1>state — Run の中を短く保つ<span class="path">example/state/</span></h1>
-<p>アクティビティの入力が増えると、ステップを並べただけのワークフローは読めなくなります。入力と各ステップの出力を1つの構造体に持たせ、ステップをそのメソッドにします。</p>
+<h1>external — signal で他のワークフローを動かす<span class="path">example/workflow/external/</span></h1>
+<p>在庫が長命のワークフローの中にある場合。saga は signal で押さえ、失敗したら signal で戻します。<strong>3つ目の executor</strong>で、3つの中では一番弱い形です。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -87,87 +87,72 @@
     <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
   </div>
 
-<h2>コードの形</h2>
-<p>これだけは実行時の経路ではなく、<strong>書き方</strong>の話です。</p>
+<h2>charge で失敗したとき</h2>
+<p>
+  在庫は長命の <code>InventoryWorkflow</code> の中にあります。saga は「押さえろ」と signal を
+  送り、後のステップが失敗したら「戻せ」と signal を送ります。
+</p>
 <div class="strip">
-  <div class="lane"><span class="tag">Run の body</span><span class="note">2行</span></div>
+  <div class="lane"><span class="tag">saga</span></div>
   <div class="row">
-    <div class="cell f" style="flex:0 0 auto;padding:9px 18px">w := &amp;fulfillment{in: in}<span class="sub2">return w.run(ctx, s)</span></div>
+    <div class="cell f">hold<span class="sub2">saga.Func</span></div>
     <div class="arr">→</div>
-    <div class="cell s" style="flex:0 0 auto;padding:9px 18px">fulfillment<span class="sub2">in / reservation / charge / approvedBy / packing / shipment</span></div>
-  </div>
-  <div class="fail-mark q">▼ ステップはメソッド。state から入力を組み、結果を state に戻す</div>
-  <div class="row">
-    <div class="cell f">w.reserve<span class="sub2">→ w.reservation</span></div>
-    <div class="arr">→</div>
-    <div class="cell f">w.chargeCard<span class="sub2">w.reservation を使う</span></div>
-    <div class="arr">→</div>
-    <div class="cell w">w.approve<span class="sub2">signal を待つ／Func</span></div>
-    <div class="arr">→</div>
-    <div class="cell f">w.pack</div>
-    <div class="arr">→</div>
-    <div class="cell f">w.ship<span class="sub2">w.charge と w.approvedBy を使う</span></div>
-  </div>
-</div>
-
-<pre><code>func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-    w.reserve(ctx, s)
-    w.chargeCard(ctx, s)
-    w.approve(ctx, s)
-    w.pack(ctx, s)
-    w.ship(ctx, s)
-
-    if err := s.Err(); err != nil {     // 分岐と戻り値の前に1回だけ見る
-        return Receipt{}, err
-    }
-    return Receipt{Reservation: w.reservation, Charge: w.charge, ApprovedBy: w.approvedBy,
-        Pack: w.packing, Shipment: w.shipment}, nil
-}</code></pre>
-
-<div class="note-box">
-  <strong>state 構造体そのものを <code>Step</code> に渡すことはできません。</strong>
-  <code>Step</code> の入力はアクティビティの引数なので、シリアライズ可能である必要が
-  あります。メソッドの中で state からリクエストを組んでください。
-</div>
-
-<div class="note-box">
-  <strong>同じ saga を素の形でも書いてあります。</strong>
-  <code>workflow_flat.go</code> は上と同じ5ステップを <code>saga.Run</code> の
-  クロージャに並べたもので、違うのは本体の書き方だけです。2つを並べて読むためのもので、
-  仕様が両方を動かして同じ <code>Receipt</code> が返ることを確かめています。
-</div>
-
-<h2>巻き戻しは基本形と同じ</h2>
-<p>書き方を変えてもロールバックが弱くなっていないこと、が仕様で見たいことです。
-approve はアクティビティではないので、履歴にも巻き戻しにも現れません。</p>
-<div class="strip">
-  <div class="row">
-    <div class="cell f">reserve</div><div class="arr">→</div>
-    <div class="cell f">charge</div><div class="arr">→</div>
-    <div class="cell f">pack</div><div class="arr">→</div>
-    <div class="cell u">ship ✕</div>
+    <div class="cell u">charge ✕<span class="sub2">card declined</span></div>
   </div>
   <div class="fail-mark">▼</div>
   <div class="row">
-    <div class="cell u">reserve:undo</div><div class="arr">←</div>
-    <div class="cell u">charge:undo</div><div class="arr">←</div>
-    <div class="cell u">pack:undo</div><div class="arr">←</div>
-    <div class="cell u">ship:undo</div>
+    <div class="cell u">hold:undo<span class="sub2">release を送る</span></div>
+    <div class="arr">←</div>
+    <div class="cell u">charge:undo</div>
+  </div>
+  <div class="fail-mark q">│ signal ↓ ↑ 同じ payload（HoldReq）</div>
+  <div class="lane"><span class="tag">別のワークフロー</span><span class="note">saga のことを知らない</span></div>
+  <div class="row">
+    <div class="cell s" style="flex:0 0 auto;padding:9px 22px">InventoryWorkflow<span class="sub2">held["widget"]: 2 → 0</span></div>
   </div>
 </div>
 
-<div class="spec"><b>シナリオ: 最後で失敗すれば、4つ分が逆順で取り消される</b>
+<div class="note-box">
+  <strong>このステップには冪等キーが載りません。</strong> <code>SignalExternalWorkflow</code>
+  には options 構造体が無く、<code>ActivityID</code> や <code>WorkflowID</code> に相当する
+  フィールドがありません。saga が保証するのは<strong>対になっていること</strong>だけです。
+  押さえた後に失敗したら必ず戻す。受け手が同じ signal を2回受けても壊れないようにするのは
+  <strong>受け手の責任</strong>です。
+</div>
 
-  前提 状態を持つ注文 "half" を "ship" で失敗させる
-  もし 状態を持つ注文の承認を送る
-  ならば saga は "no carrier" で失敗する
-  かつ ステップ "reserve, charge, pack, ship, ship:undo, pack:undo, charge:undo, reserve:undo" が実行された
-  かつ 注文は "reserve, charge, pack, ship" を保持していない</div>
+<pre><code>saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease),
+    HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+
+// 2つとも普通のワークフローコード
+func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
+    err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
+    return struct{}{}, err
+}
+func sendRelease(ctx workflow.Context, req HoldReq) error {
+    return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
+}</code></pre>
+
+<p>補償は forward と同じ payload を受け取るので、<strong>押さえた分だけを正確に戻せます</strong>。</p>
+
+<h2>3つ目の executor</h2>
+<table>
+  <tr><th></th><th>実行</th><th>冪等キー</th><th>予算で切る対象</th></tr>
+  <tr><td><code>saga.Activity</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
+  <tr><td><code>saga.ChildWorkflow</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
+  <tr><td><code>saga.Func</code>（signal）</td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
+</table>
+
+<div class="spec"><b>## 失敗すると、押さえた在庫が signal で戻される</b>
+
+* 在庫ワークフロー "inv-fail" を起動する
+* 在庫を押さえる注文 "ext-fail" を "charge" で失敗させる
+* saga は "card declined" で失敗する
+* 在庫ワークフロー "inv-fail" の "widget" の確保数は "0"</div>
 
 <footer>
-  ソース: <code>example/state/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/external/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>

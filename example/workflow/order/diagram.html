@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>external — signal で他のワークフローを動かす — temporal-workflow-kit example</title>
+<title>order — 基本形 — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -75,10 +75,10 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="diagram.html" class="here">external</a></nav>
+<nav>example/ &nbsp;<a href="diagram.html" class="here">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>external — signal で他のワークフローを動かす<span class="path">example/external/</span></h1>
-<p>在庫が長命のワークフローの中にある場合。saga は signal で押さえ、失敗したら signal で戻します。<strong>3つ目の executor</strong>で、3つの中では一番弱い形です。</p>
+<h1>order — 基本形<span class="path">example/workflow/order/</span></h1>
+<p>在庫を押さえ、課金し、配送を手配する。どれかが失敗したら、<strong>そこまでに起きたことを逆順で取り消す</strong>。他の4つはこの形からの派生です。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -87,72 +87,91 @@
     <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
   </div>
 
-<h2>charge で失敗したとき</h2>
-<p>
-  在庫は長命の <code>InventoryWorkflow</code> の中にあります。saga は「押さえろ」と signal を
-  送り、後のステップが失敗したら「戻せ」と signal を送ります。
-</p>
+<h2>正常系</h2>
 <div class="strip">
-  <div class="lane"><span class="tag">saga</span></div>
+  <div class="lane"><span class="tag">forward</span></div>
   <div class="row">
-    <div class="cell f">hold<span class="sub2">saga.Func</span></div>
+    <div class="cell f">reserve<span class="sub2">Reserve</span></div>
     <div class="arr">→</div>
-    <div class="cell u">charge ✕<span class="sub2">card declined</span></div>
+    <div class="cell f">charge<span class="sub2">Charge</span></div>
+    <div class="arr">→</div>
+    <div class="cell f">ship<span class="sub2">Ship</span></div>
+    <div class="arr">→</div>
+    <div class="cell g">Receipt</div>
   </div>
-  <div class="fail-mark">▼</div>
+</div>
+
+<h2>ship で失敗したとき</h2>
+<div class="strip">
+  <div class="lane"><span class="tag">forward</span></div>
   <div class="row">
-    <div class="cell u">hold:undo<span class="sub2">release を送る</span></div>
+    <div class="cell f">reserve</div>
+    <div class="arr">→</div>
+    <div class="cell f">charge</div>
+    <div class="arr">→</div>
+    <div class="cell u">ship ✕<span class="sub2">no carrier</span></div>
+  </div>
+  <div class="fail-mark">▼ 逆順で巻き戻す</div>
+  <div class="lane"><span class="tag">補償</span><span class="note">失敗したステップ自身も取り消す</span></div>
+  <div class="row">
+    <div class="cell u">reserve:undo<span class="sub2">Unreserve</span></div>
     <div class="arr">←</div>
-    <div class="cell u">charge:undo</div>
-  </div>
-  <div class="fail-mark q">│ signal ↓ ↑ 同じ payload（HoldReq）</div>
-  <div class="lane"><span class="tag">別のワークフロー</span><span class="note">saga のことを知らない</span></div>
-  <div class="row">
-    <div class="cell s" style="flex:0 0 auto;padding:9px 22px">InventoryWorkflow<span class="sub2">held["widget"]: 2 → 0</span></div>
+    <div class="cell u">charge:undo<span class="sub2">Refund</span></div>
+    <div class="arr">←</div>
+    <div class="cell u">ship:undo<span class="sub2">CancelShipment</span></div>
   </div>
 </div>
 
 <div class="note-box">
-  <strong>このステップには冪等キーが載りません。</strong> <code>SignalExternalWorkflow</code>
-  には options 構造体が無く、<code>ActivityID</code> や <code>WorkflowID</code> に相当する
-  フィールドがありません。saga が保証するのは<strong>対になっていること</strong>だけです。
-  押さえた後に失敗したら必ず戻す。受け手が同じ signal を2回受けても壊れないようにするのは
-  <strong>受け手の責任</strong>です。
+  <strong>失敗した ship も補償されます。</strong> 補償はステップを実行する<em>前</em>に
+  登録されるからです。タイムアウトで失敗したアクティビティは、結果を返せなかっただけで
+  ワーカー上では完走しているかもしれません。<code>ship:undo</code> は「何も予約されて
+  いない」と分かれば no-op で成功します。
 </div>
 
-<pre><code>saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease),
-    HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+<div class="spec"><b>## 失敗すると、失敗したステップを含めて逆順に取り消される</b>
 
-// 2つとも普通のワークフローコード
-func sendHold(ctx workflow.Context, req HoldReq) (struct{}, error) {
-    err := workflow.SignalExternalWorkflow(ctx, req.Inventory, "", HoldSignal, req).Get(ctx, nil)
-    return struct{}{}, err
-}
-func sendRelease(ctx workflow.Context, req HoldReq) error {
-    return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
-}</code></pre>
+* "ship" で失敗する注文 "rollback"
+* saga は "no carrier available" で失敗する
+* ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
+* 注文は "reserve, charge, ship" を保持していない</div>
 
-<p>補償は forward と同じ payload を受け取るので、<strong>押さえた分だけを正確に戻せます</strong>。</p>
+<h2>キャンセルされたとき</h2>
+<p>
+  このライブラリの存在理由にあたる経路。キャンセル済みの context は以降のアクティビティを
+  即座に失敗させるので、<strong>補償は切り離した context で実行</strong>します。
+</p>
+<div class="strip">
+  <div class="row">
+    <div class="cell f">reserve</div>
+    <div class="arr">→</div>
+    <div class="cell f">charge</div>
+    <div class="arr">→</div>
+    <div class="cell w">待機中<span class="sub2">workflow.Sleep</span></div>
+    <div class="arr">→</div>
+    <div class="cell u">✕ Cancel</div>
+  </div>
+  <div class="fail-mark">▼ NewDisconnectedContext で実行</div>
+  <div class="row">
+    <div class="cell u">reserve:undo</div>
+    <div class="arr">←</div>
+    <div class="cell u">charge:undo</div>
+    <div class="arr">←</div>
+    <div class="cell x">ship:undo<span class="sub2">未登録（ship は始まっていない）</span></div>
+  </div>
+</div>
 
-<h2>3つ目の executor</h2>
-<table>
-  <tr><th></th><th>実行</th><th>冪等キー</th><th>予算で切る対象</th></tr>
-  <tr><td><code>saga.Activity</code></td><td><code>ExecuteActivity</code></td><td><code>ActivityID</code></td><td><code>ScheduleToCloseTimeout</code></td></tr>
-  <tr><td><code>saga.ChildWorkflow</code></td><td><code>ExecuteChildWorkflow</code></td><td><code>WorkflowID</code></td><td><code>WorkflowExecutionTimeout</code></td></tr>
-  <tr><td><code>saga.Func</code>（signal）</td><td><code>SignalExternalWorkflow</code></td><td style="color:var(--undo)"><strong>無い</strong></td><td style="color:var(--ink-3)">無い（コマンドなので即応答）</td></tr>
-</table>
+<div class="spec"><b>## キャンセルされた saga もロールバックされる</b>
 
-<div class="spec"><b>## 失敗すると、押さえた在庫が signal で戻される</b>
-
-* 在庫ワークフロー "inv-fail" を起動する
-* 在庫を押さえる注文 "ext-fail" を "charge" で失敗させる
-* saga は "card declined" で失敗する
-* 在庫ワークフロー "inv-fail" の "widget" の確保数は "0"</div>
+* 課金の後で待機する注文 "cancelme"
+* "charge" が実行されたら saga をキャンセルする
+* ステップ "reserve, charge, charge:undo, reserve:undo" が実行された
+* 注文は "reserve, charge" を保持していない</div>
 
 <footer>
-  ソース: <code>example/external/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/order/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>

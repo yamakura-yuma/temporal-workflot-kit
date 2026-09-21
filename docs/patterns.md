@@ -8,12 +8,12 @@
 
 | 知りたいこと | 答え | 実物 | 図 |
 | --- | --- | --- | --- |
-| ステップはアクティビティに限るのか | 限らない。`saga.Step` に渡す値で決まる | [`example/childflow/`](../example/childflow/) | [図](../example/childflow/diagram.html) |
-| アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/pipeline/`](../example/pipeline/) | [図](../example/pipeline/diagram.html) |
-| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行。素の形との読み比べは [`workflow_flat.go`](../example/state/workflow_flat.go) | [`example/state/`](../example/state/) | [図](../example/state/diagram.html) |
-| signal を待つには | `saga.Func` でステップにする。判断は自分の関数の中 | [`example/approval/`](../example/approval/) | [図](../example/approval/diagram.html) |
-| signal を送るステップは書けるか | 書ける。`saga.Func` で。ただし冪等キーは載らない | [`example/external/`](../example/external/) | [図](../example/external/diagram.html) |
-| 基本形 | 3ステップと補償、冪等キーを呼び先に渡すアクティビティ | [`example/order/`](../example/order/) | [図](../example/order/diagram.html) |
+| ステップはアクティビティに限るのか | 限らない。`saga.Step` に渡す値で決まる | [`example/workflow/childflow/`](../example/workflow/childflow/) | [図](../example/workflow/childflow/diagram.html) |
+| アクティビティの結果を次のステップに渡せるか | 渡せる。補償も同じ入力を受け取る | [`example/workflow/pipeline/`](../example/workflow/pipeline/) | [図](../example/workflow/pipeline/diagram.html) |
+| `Run` の中が長くなるのをどうするか | state 構造体とメソッドに割る。クロージャは2行。素の形との読み比べは [`workflow_flat.go`](../example/workflow/state/workflow_flat.go) | [`example/workflow/state/`](../example/workflow/state/) | [図](../example/workflow/state/diagram.html) |
+| signal を待つには | `saga.Func` でステップにする。判断は自分の関数の中 | [`example/workflow/approval/`](../example/workflow/approval/) | [図](../example/workflow/approval/diagram.html) |
+| signal を送るステップは書けるか | 書ける。`saga.Func` で。ただし冪等キーは載らない | [`example/workflow/external/`](../example/workflow/external/) | [図](../example/workflow/external/diagram.html) |
+| 基本形 | 3ステップと補償、冪等キーを呼び先に渡すアクティビティ | [`example/workflow/order/`](../example/workflow/order/) | [図](../example/workflow/order/diagram.html) |
 
 ---
 
@@ -41,7 +41,7 @@ saga.Step(ctx, s, "approval", saga.Func(awaitApproval), nil, ApprovalReq{Wait: w
 混ぜられます。補償のレジストリは executor を区別しないので、巻き戻しは1つの逆順で回ります。
 
 **forward と補償は別々の値なので、片方だけ別の executor にできます。** 上の例は
-`example/childflow/` そのもので、荷造りは自分の履歴を持つに足る長さなので子ワークフロー、
+`example/workflow/childflow/` そのもので、荷造りは自分の履歴を持つに足る長さなので子ワークフロー、
 荷ほどきはアクティビティ1回です。
 
 子ワークフロー側は `saga.IdempotencyKeyOf` で自分の鍵を読みます。鍵は子の `WorkflowID` に
@@ -109,7 +109,7 @@ func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 - 同じ入力を3つ以上のステップで使い回す
 - 前段の出力を2段以上先のステップへ渡す
 
-どれにも当たらないなら素の形（[`example/order/`](../example/order/)）のままでよく、
+どれにも当たらないなら素の形（[`example/workflow/order/`](../example/workflow/order/)）のままでよく、
 state 形にしても構造体とメソッドの分だけ間接が増えます。
 
 ```go
@@ -135,7 +135,7 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 
 `saga.Step` が `ctx` と `s` を引数で取るので、ステップはメソッドでも関数でも好きに割れます。
 
-同じ saga を素の形で書いたものが [`example/state/workflow_flat.go`](../example/state/workflow_flat.go)
+同じ saga を素の形で書いたものが [`example/workflow/state/workflow_flat.go`](../example/workflow/state/workflow_flat.go)
 にあります。入力も5ステップも同じで、違うのは本体の書き方だけなので、2つを並べて読めば
 上の閾値が実物として見えます。どちらが読みやすいかは読者が決めてください。仕様
 （[`state.feature`](specs/state.feature)）は両方を動かして同じ `Receipt` が返ることを

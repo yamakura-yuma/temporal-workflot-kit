@@ -9,7 +9,9 @@
 // The child reads its idempotency key with saga.IdempotencyKeyOf, which is the
 // workflow-side twin of saga.IdempotencyKey. The key rides in the child's
 // WorkflowID, and the compensating child gets the same key back with the
-// ":undo" suffix stripped.
+// ":undo" suffix stripped. It hands the key down to the shared Pack activity in
+// PackReq.Key, which is the one field of example/activity/ that exists for this
+// example.
 package childflow
 
 import (
@@ -18,19 +20,13 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
 // TaskQueue is shared between the worker and whoever starts the workflow. The
 // children inherit it.
 const TaskQueue = "saga-childflow"
-
-// Order is the workflow input.
-type Order struct {
-	ID     string `json:"id"`
-	SKU    string `json:"sku"`
-	FailAt string `json:"fail_at,omitempty"`
-}
 
 // Receipt is the workflow output.
 type Receipt struct {
@@ -41,8 +37,8 @@ type Receipt struct {
 
 // ChildflowWorkflow reserves stock, packs the order in a child workflow, and
 // books a shipment.
-func ChildflowWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-	var a *Activities
+func ChildflowWorkflow(ctx workflow.Context, in activity.Order) (Receipt, error) {
+	var a *activity.Activities
 
 	return saga.Run(ctx, saga.Options{
 		ActivityOptions: workflow.ActivityOptions{
@@ -51,7 +47,7 @@ func ChildflowWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), activity.ReserveReq{Order: in})
 
 		// The two halves run differently. Packing is long enough to deserve a
 		// child workflow of its own; undoing it is one activity call. Both
@@ -59,17 +55,19 @@ func ChildflowWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		// IdempotencyKeyOf, the activity with IdempotencyKey.
 		pack, _ := saga.Step(ctx, s, "pack",
 			saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack),
-			PackReq{Order: in})
+			activity.PackReq{Order: in})
 
-		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in, Pack: pack})
+		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), activity.ShipReq{Order: in, Pack: pack})
 
 		return Receipt{Reservation: res, Pack: pack, Shipment: shp}, nil
 	})
 }
 
-// PackWorkflow is the forward half of the packing step.
-func PackWorkflow(ctx workflow.Context, req PackReq) (string, error) {
-	var a *Activities
+// PackWorkflow is the forward half of the packing step. It reads the saga's
+// idempotency key and passes it to the activity, because an activity started
+// from in here would otherwise get a key of the child's own.
+func PackWorkflow(ctx workflow.Context, req activity.PackReq) (string, error) {
+	var a *activity.Activities
 
 	key, _ := saga.IdempotencyKeyOf(ctx)
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -77,7 +75,9 @@ func PackWorkflow(ctx workflow.Context, req PackReq) (string, error) {
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
 
+	req.Key = key
+
 	var id string
-	err := workflow.ExecuteActivity(ctx, a.Pack, Note{Key: key, Order: req.Order.ID}).Get(ctx, &id)
+	err := workflow.ExecuteActivity(ctx, a.Pack, req).Get(ctx, &id)
 	return id, err
 }

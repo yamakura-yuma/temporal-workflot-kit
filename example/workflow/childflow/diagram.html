@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>approval — ステップの間で人を待つ — temporal-workflow-kit example</title>
+<title>childflow — 子で実行し、アクティビティで取り消す — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -75,10 +75,10 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="diagram.html" class="here">approval</a> · <a href="../external/diagram.html">external</a></nav>
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="diagram.html" class="here">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>approval — ステップの間で人を待つ<span class="path">example/approval/</span></h1>
-<p>ステップの間で signal を待ちます。saga の外側の話なので、ライブラリは関与しません。</p>
+<h1>childflow — 子で実行し、アクティビティで取り消す<span class="path">example/workflow/childflow/</span></h1>
+<p>ステップはアクティビティに限りません。しかも forward と取り消しで別々に選べます。梱包は子ワークフロー、取り消しはアクティビティ1本。<strong>混在しても巻き戻しは1つの逆順</strong>です。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -87,73 +87,77 @@
     <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
   </div>
 
-<h2>3つの結末</h2>
-<p>
-  予約を取ってから承認を待ち、通れば課金します。<strong>承認されなかった3通りは、どれも
-  同じ巻き戻しに合流します</strong>。ワークフロー本体はエラーを返すだけです。
-</p>
+<h2>ship で失敗したとき</h2>
 <div class="strip">
+  <div class="lane"><span class="tag">forward</span></div>
   <div class="row">
-    <div class="cell f">reserve</div>
+    <div class="cell f">reserve<span class="sub2">アクティビティ</span></div>
     <div class="arr">→</div>
-    <div class="cell w">承認待ち<span class="sub2">workflow.Selector</span></div>
+    <div class="cell c">pack<span class="sub2">PackWorkflow（子）</span></div>
+    <div class="arr">→</div>
+    <div class="cell u">ship ✕<span class="sub2">アクティビティ</span></div>
   </div>
-  <div class="fail-mark q">▼</div>
-  <div class="row" style="gap:10px">
-    <div class="cell g">承認された<span class="sub2">→ charge → Receipt</span></div>
-    <div class="cell u">却下された<span class="sub2">ApprovalDenied</span></div>
-    <div class="cell u">時間切れ<span class="sub2">タイマーが先に鳴る</span></div>
-    <div class="cell u">待機中に Cancel<span class="sub2">context が閉じる</span></div>
-  </div>
-  <div class="fail-mark">▼ 右の3つは同じ</div>
+  <div class="fail-mark">▼ executor が違っても1つの逆順</div>
+  <div class="lane"><span class="tag">補償</span><span class="note">forward と別の executor でよい</span></div>
   <div class="row">
-    <div class="cell u" style="flex:0 0 auto;padding:9px 22px">reserve:undo<span class="sub2">予約を解放する</span></div>
+    <div class="cell u">reserve:undo</div>
+    <div class="arr">←</div>
+    <div class="cell u">pack:undo<span class="sub2">a.Unpack（アクティビティ）</span></div>
+    <div class="arr">←</div>
+    <div class="cell u">ship:undo</div>
   </div>
 </div>
 
-<p><strong>本体はステップの列のまま。</strong>待つ処理も1行です。</p>
-
-<pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
-saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
-chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, order.ChargeReq{Order: in.Order})</code></pre>
-
-<p>判断は利用者が書いた関数の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
-関数の中に閉じ込めるのと、同じ立ち位置です。</p>
-
-<pre><code>func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
-    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
-    if !ok {
-        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
-    }
-    if !decision.Approved {
-        return Decision{}, temporal.NewApplicationError("rejected by "+decision.By, DeniedType, nil)
-    }
-    return decision, nil
-}</code></pre>
-
-<div class="note-box">
-  <strong>待っている間にキャンセルされても補償は走ります。</strong> 切り離した context で
-  実行されるからで、ワークフロー側は何も書きません。
-</div>
+<h2>executor ごとに違うのは3点だけ</h2>
+<table>
+  <tr><th></th><th>実行</th><th>冪等キーを載せる場所</th><th>予算で切る対象</th></tr>
+  <tr>
+    <td><strong>アクティビティ</strong><br><code>saga.Activity</code></td>
+    <td><code>ExecuteActivity</code></td>
+    <td><code>ActivityOptions.ActivityID</code></td>
+    <td><code>ScheduleToCloseTimeout</code></td>
+  </tr>
+  <tr>
+    <td><strong>子ワークフロー</strong><br><code>saga.ChildWorkflow</code></td>
+    <td><code>ExecuteChildWorkflow</code></td>
+    <td><code>ChildWorkflowOptions.WorkflowID</code></td>
+    <td><code>WorkflowExecutionTimeout</code></td>
+  </tr>
+  <tr>
+    <td><strong>ローカルアクティビティ</strong><br>対象外</td>
+    <td><code>ExecuteLocalActivity</code></td>
+    <td style="color:var(--undo)"><strong>無い</strong></td>
+    <td><code>ScheduleToCloseTimeout</code></td>
+  </tr>
+</table>
 
 <div class="note-box">
-  <strong>ステップなので、先が失敗していれば飛ばされます。</strong> ロールバックに
-  向かっている saga が、人の承認を1時間待って止まることはありません。報告されるのも
-  <strong>最初の失敗</strong>で、この待ちが出す「誰も承認しなかった」ではありません。
+  <strong>forward と補償は別々に選べます。</strong> 梱包は履歴を持つ価値があるので子
+  ワークフロー、取り消しはアクティビティ1本。<strong>実行の仕方が違っても両者は同じ
+  冪等キーを見ます</strong> — 子は <code>IdempotencyKeyOf</code> で
+  <code>WorkflowID</code> から、アクティビティは <code>IdempotencyKey</code> で
+  <code>ActivityID</code> から読み、<code>:undo</code> は剥がされた後なので同じ値です。
 </div>
 
-<div class="spec"><b>## 却下されれば予約は取り消される</b>
+<pre><code>res,  _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, ReserveReq{Order: in})
+pack, _ := saga.Step(ctx, s, "pack",
+    saga.ChildWorkflow(PackWorkflow), saga.UndoActivity(a.Unpack), PackReq{Order: in})
+//  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   ~~~~~~~~~~~~~~~~~~~~~~~~~
+//  子ワークフローで実行し             アクティビティで取り消す</code></pre>
 
-* 承認待ちの注文 "denied"
-* 却下を送る
-* saga は "ApprovalDenied" で失敗する
-* ステップ "reserve, reserve:undo" が実行された
-* 注文は "reserve" を保持していない</div>
+<div class="spec"><b>## 子ワークフローのステップも逆順で取り消される</b>
+
+* 子ワークフローを含む注文 "mixed" を "ship" で失敗させる
+* saga は "no carrier available" で失敗する
+* 子ワークフロー "pack" が起動された
+* ステップ "reserve, ship, ship:undo, pack:undo, reserve:undo" が実行された
+* 梱包と取り消しが見た冪等キーは一致する
+* 注文は "reserve, ship" を保持していない</div>
 
 <footer>
-  ソース: <code>example/approval/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/childflow/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>

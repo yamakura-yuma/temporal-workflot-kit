@@ -122,14 +122,18 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 それぞれに `diagram.html` を置いてあります。正常系と失敗時にどの順で何が走るかは、
 そちらをブラウザで開くのが早いです。
 
+アクティビティは [`example/activity/`](example/activity/) に1セットだけあります。
+ワークフローごとの写しは置いていません。アクティビティはワークフローではなくワーカーに
+属するもので、下の6つは同じ `Reserve` や `Charge` を呼びます。
+
 | 例 | 何を見せているか | 図 |
 | --- | --- | --- |
-| [`example/order/`](example/order/) | 基本形。3ステップと補償、冪等キーを呼び先に渡すアクティビティの書き方 | [図](example/order/diagram.html) |
-| [`example/pipeline/`](example/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/pipeline/diagram.html) |
-| [`example/state/`](example/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/state/diagram.html) |
-| [`example/childflow/`](example/childflow/) | 子ワークフローで実行し、アクティビティで取り消すステップ。冪等キーは executor を跨いで同じ | [図](example/childflow/diagram.html) |
-| [`example/approval/`](example/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/approval/diagram.html) |
-| [`example/external/`](example/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/external/diagram.html) |
+| [`example/workflow/order/`](example/workflow/order/) | 基本形。3ステップと補償、冪等キーを呼び先に渡すアクティビティの書き方 | [図](example/workflow/order/diagram.html) |
+| [`example/workflow/pipeline/`](example/workflow/pipeline/) | 前段の出力が次段の入力になる saga。補償が前段の ID をどう受け取るか | [図](example/workflow/pipeline/diagram.html) |
+| [`example/workflow/state/`](example/workflow/state/) | 入力が多い5ステップの saga を state 構造体とメソッドに割り、`Run` の中を2行に保つ。同じ saga を素の形で書いた `workflow_flat.go` と読み比べられる | [図](example/workflow/state/diagram.html) |
+| [`example/workflow/childflow/`](example/workflow/childflow/) | 子ワークフローで実行し、アクティビティで取り消すステップ。冪等キーは executor を跨いで同じ | [図](example/workflow/childflow/diagram.html) |
+| [`example/workflow/approval/`](example/workflow/approval/) | signal 待ちをステップにする。判断は自分の関数の中で完結させる | [図](example/workflow/approval/diagram.html) |
+| [`example/workflow/external/`](example/workflow/external/) | signal で他のワークフローを動かすステップ。失敗すると打ち消しの signal が飛ぶ | [図](example/workflow/external/diagram.html) |
 
 形ごとの書き方は [docs/patterns.md](docs/patterns.md) に。
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pipeline — 前段の出力が次段の入力になる — temporal-workflow-kit example</title>
+<title>approval — ステップの間で人を待つ — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -75,10 +75,10 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="diagram.html" class="here">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="diagram.html" class="here">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>pipeline — 前段の出力が次段の入力になる<span class="path">example/pipeline/</span></h1>
-<p>予約 ID を課金の入力に、課金 ID を配送の入力に渡します。見どころは<strong>補償の側</strong>です。</p>
+<h1>approval — ステップの間で人を待つ<span class="path">example/workflow/approval/</span></h1>
+<p>ステップの間で signal を待ちます。saga の外側の話なので、ライブラリは関与しません。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -87,54 +87,73 @@
     <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
   </div>
 
-<h2>ship で失敗したとき</h2>
+<h2>3つの結末</h2>
+<p>
+  予約を取ってから承認を待ち、通れば課金します。<strong>承認されなかった3通りは、どれも
+  同じ巻き戻しに合流します</strong>。ワークフロー本体はエラーを返すだけです。
+</p>
 <div class="strip">
-  <div class="lane"><span class="tag">forward</span><span class="note">出力が次の入力になる</span></div>
   <div class="row">
     <div class="cell f">reserve</div>
-    <div class="arr data"><span>予約 ID</span><span class="val">res-chain</span><span>↓</span></div>
-    <div class="cell f">charge</div>
-    <div class="arr data"><span>課金 ID</span><span class="val">chg-res-chain</span><span>↓</span></div>
-    <div class="cell u">ship ✕</div>
+    <div class="arr">→</div>
+    <div class="cell w">承認待ち<span class="sub2">workflow.Selector</span></div>
   </div>
-  <div class="fail-mark">▼</div>
-  <div class="lane"><span class="tag">補償</span><span class="note">forward と同じ入力を受け取る</span></div>
+  <div class="fail-mark q">▼</div>
+  <div class="row" style="gap:10px">
+    <div class="cell g">承認された<span class="sub2">→ charge → Receipt</span></div>
+    <div class="cell u">却下された<span class="sub2">ApprovalDenied</span></div>
+    <div class="cell u">時間切れ<span class="sub2">タイマーが先に鳴る</span></div>
+    <div class="cell u">待機中に Cancel<span class="sub2">context が閉じる</span></div>
+  </div>
+  <div class="fail-mark">▼ 右の3つは同じ</div>
   <div class="row">
-    <div class="cell u">reserve:undo</div>
-    <div class="arr data"><span class="val">res-chain</span><span>↑</span></div>
-    <div class="cell u">charge:undo</div>
-    <div class="arr data"><span class="val">chg-res-chain</span><span>↑</span></div>
-    <div class="cell u">ship:undo</div>
+    <div class="cell u" style="flex:0 0 auto;padding:9px 22px">reserve:undo<span class="sub2">予約を解放する</span></div>
   </div>
+</div>
+
+<p><strong>本体はステップの列のまま。</strong>待つ処理も1行です。</p>
+
+<pre><code>res, _ := saga.Step(ctx, s, "reserve", a.Reserve, a.Unreserve, order.ReserveReq{Order: in.Order})
+saga.InlineStep(ctx, s, "approval", awaitApproval, nil, ApprovalReq{Wait: wait})
+chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund, order.ChargeReq{Order: in.Order})</code></pre>
+
+<p>判断は利用者が書いた関数の中で完結します。アクティビティが「自分の失敗が何を意味するか」を
+関数の中に閉じ込めるのと、同じ立ち位置です。</p>
+
+<pre><code>func awaitApproval(ctx workflow.Context, req ApprovalReq) (Decision, error) {
+    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, req.Wait)
+    if !ok {
+        return Decision{}, temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
+    }
+    if !decision.Approved {
+        return Decision{}, temporal.NewApplicationError("rejected by "+decision.By, DeniedType, nil)
+    }
+    return decision, nil
+}</code></pre>
+
+<div class="note-box">
+  <strong>待っている間にキャンセルされても補償は走ります。</strong> 切り離した context で
+  実行されるからで、ワークフロー側は何も書きません。
 </div>
 
 <div class="note-box">
-  <strong>補償は、そのステップ自身の出力を見られません。</strong> 登録されるのが実行より
-  前だからです。代わりに forward と同じ入力を受け取るので、<em>前段まで</em>の出力は
-  手元にあります。自分のステップの出力が要る場合は、冪等キーで引いてください。
+  <strong>ステップなので、先が失敗していれば飛ばされます。</strong> ロールバックに
+  向かっている saga が、人の承認を1時間待って止まることはありません。報告されるのも
+  <strong>最初の失敗</strong>で、この待ちが出す「誰も承認しなかった」ではありません。
 </div>
 
-<pre><code>chg, _ := saga.Step(ctx, s, "charge", a.Charge, a.Refund,
-    ChargeReq{Order: in, Reservation: res})   // ← 前段の出力
+<div class="spec"><b>## 却下されれば予約は取り消される</b>
 
-// Refund は同じ ChargeReq を受け取るので、req.Reservation が使える
-func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
-    a.ledger.record("charge", req.Reservation)
-    ...
-}</code></pre>
-
-<div class="spec"><b>## 前段の ID が、次段の補償にも渡っている</b>
-
-* 連鎖する注文 "chain" を "ship" で失敗させる
-* saga は "no carrier available" で失敗する
-* ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-* 補償 "charge" が受け取った前段の ID は "res-chain"
-* 補償 "ship" が受け取った前段の ID は "chg-res-chain"</div>
+* 承認待ちの注文 "denied"
+* 却下を送る
+* saga は "ApprovalDenied" で失敗する
+* ステップ "reserve, reserve:undo" が実行された
+* 注文は "reserve" を保持していない</div>
 
 <footer>
-  ソース: <code>example/pipeline/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/approval/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>

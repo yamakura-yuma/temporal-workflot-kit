@@ -101,7 +101,8 @@ just spec -run 'TestFeatures/成功した_saga_は何も取り消さない'
 | `saga/` | ライブラリ本体とユニットテスト |
 | `docs/specs/` | 実行される仕様（`.feature`）と、その索引 `README.md`。結合テストの本体 |
 | `specsteps/` | 仕様文と Go を繋ぐ語彙層。そのステップの実装と、サーバとワーカーを起動する `TestMain` |
-| `example/*/` | 仕様が動かす saga。1テーマ1 example（order / pipeline / state / childflow / approval / external） |
+| `example/activity/` | 仕様が動かすアクティビティ。ワークフローごとではなく1セットで、1アクティビティ1ファイル |
+| `example/workflow/*/` | 仕様が動かす saga。1テーマ1パッケージ（order / pipeline / state / childflow / approval / external） |
 
 結合テストは `docs/specs/` の仕様・`specsteps/` のステップ実装・スイートが起動する実際の
 dev server の3つで成り立ちます。押さえたい振る舞いは仕様の側に書き、`specsteps/` は

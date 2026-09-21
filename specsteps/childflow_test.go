@@ -12,17 +12,18 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/childflow"
 )
 
 func registerChildflowSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^子ワークフローを含む注文 "([^"]*)"$`, func(ctx context.Context, id string) error {
-		return stateOf(ctx).startChildflow(childflow.Order{ID: id, SKU: "widget"})
+		return stateOf(ctx).startChildflow(sampleLine(id, ""))
 	})
 
 	sc.Step(`^子ワークフローを含む注文 "([^"]*)" を "([^"]*)" で失敗させる$`,
 		func(ctx context.Context, id, step string) error {
-			return stateOf(ctx).startChildflow(childflow.Order{ID: id, SKU: "widget", FailAt: step})
+			return stateOf(ctx).startChildflow(sampleLine(id, step))
 		})
 
 	// The child workflows appear in the parent's history as
@@ -71,8 +72,8 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 
-		pack := childflow.KeySeenBy(s.childflow, "pack")
-		unpack := childflow.KeySeenBy(s.childflow, "unpack")
+		pack := activity.KeySeenBy(s.acts, "pack")
+		unpack := activity.KeySeenBy(s.acts, "unpack")
 
 		if pack == "" {
 			return errors.New("梱包の子が冪等キーを読めていません")
@@ -84,7 +85,7 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 	})
 }
 
-func (s *scenarioState) startChildflow(in childflow.Order) error {
+func (s *scenarioState) startChildflow(in activity.Order) error {
 	run, err := s.client.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{ID: "childflow-" + in.ID, TaskQueue: childflow.TaskQueue},
 		childflow.ChildflowWorkflow, in)

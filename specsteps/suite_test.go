@@ -24,12 +24,13 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/approval"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/childflow"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/external"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/pipeline"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/state"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/approval"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/childflow"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/external"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/pipeline"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/state"
 )
 
 // uiPort is the dev server's Web UI, published by the spec-ui recipe. It is
@@ -45,16 +46,16 @@ const holdEnv = "SPEC_HOLD"
 // specsDir is where the .feature files live, relative to this package.
 const specsDir = "../docs/specs"
 
-// suite is what the whole run shares. The workers hold these activity
-// instances for their lifetime, so they cannot be per-scenario; handing them to
-// each scenario through its context is what keeps them out of package-level
-// variables.
+// suite is what the whole run shares. Every worker registers the same
+// activities -- there is only one set of them -- and holds them for its
+// lifetime, so they cannot be per-scenario. Handing them to each scenario
+// through its context is what keeps them out of package-level variables.
+//
+// Sharing them across examples is safe because an idempotency key carries the
+// workflow run id, so no two sagas can write the same one.
 type suite struct {
-	client    client.Client
-	order     *order.Activities
-	pipeline  *pipeline.Activities
-	childflow *childflow.Activities
-	state     *state.Activities
+	client client.Client
+	acts   *activity.Activities
 }
 
 // suiteRun is the one piece of package-level state left: what TestMain has to
@@ -177,11 +178,8 @@ func startSuite() (*suiteRun, error) {
 	}
 
 	r.suite = &suite{
-		client:    r.devServer.Client(),
-		order:     order.NewActivities(),
-		pipeline:  pipeline.NewActivities(),
-		childflow: childflow.NewActivities(),
-		state:     state.NewActivities(),
+		client: r.devServer.Client(),
+		acts:   activity.NewActivities(),
 	}
 
 	start := func(name string, register func(w worker.Worker)) error {
@@ -196,7 +194,7 @@ func startSuite() (*suiteRun, error) {
 
 	if err := start(order.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(order.OrderWorkflow)
-		w.RegisterActivity(r.suite.order)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -205,14 +203,14 @@ func startSuite() (*suiteRun, error) {
 	// worker.
 	if err := start(approval.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(approval.ApprovalWorkflow)
-		w.RegisterActivity(r.suite.order)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
 
 	if err := start(pipeline.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(pipeline.PipelineWorkflow)
-		w.RegisterActivity(r.suite.pipeline)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -222,7 +220,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(childflow.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(childflow.ChildflowWorkflow)
 		w.RegisterWorkflow(childflow.PackWorkflow)
-		w.RegisterActivity(r.suite.childflow)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -233,7 +231,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(state.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(state.StateWorkflow)
 		w.RegisterWorkflow(state.FlatWorkflow)
-		w.RegisterActivity(r.suite.state)
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}
@@ -241,7 +239,7 @@ func startSuite() (*suiteRun, error) {
 	if err := start(external.TaskQueue, func(w worker.Worker) {
 		w.RegisterWorkflow(external.ExternalWorkflow)
 		w.RegisterWorkflow(external.InventoryWorkflow)
-		w.RegisterActivity(external.NewActivities())
+		w.RegisterActivity(r.suite.acts)
 	}); err != nil {
 		return r, err
 	}

@@ -18,7 +18,7 @@
     ならば saga は "no carrier available" で失敗する
     かつ ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
     かつ 補償 "charge" が受け取った前段の ID は "res-chain"
-    かつ 補償 "ship" が受け取った前段の ID は "chg-res-chain"
+    かつ 補償 "ship" が受け取った前段の ID は "chg-chain"
     かつ 注文は "reserve, charge, ship" を保持していない
 
   シナリオ: 正常系では最後まで連鎖する

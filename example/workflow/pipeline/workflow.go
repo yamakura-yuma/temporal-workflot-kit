@@ -6,6 +6,11 @@
 // same input as the step it undoes, so it gets the upstream ids for free --
 // which matters, because the compensation is registered before the step runs
 // and therefore cannot see that step's output.
+//
+// The activities are the shared ones in example/activity/. Nothing about them
+// is special to this example: ChargeReq and ShipReq simply have fields for the
+// upstream ids, which example/workflow/order leaves empty and the body below
+// fills in. The theme lives here, in two lines of a workflow.
 package pipeline
 
 import (
@@ -14,20 +19,12 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
 // TaskQueue is shared between the worker and whoever starts the workflow.
 const TaskQueue = "saga-pipeline"
-
-// Order is the workflow input.
-type Order struct {
-	ID     string `json:"id"`
-	SKU    string `json:"sku"`
-	Amount int    `json:"amount"`
-	// FailAt names a step whose forward call should fail.
-	FailAt string `json:"fail_at,omitempty"`
-}
 
 // Receipt is the workflow output.
 type Receipt struct {
@@ -38,8 +35,8 @@ type Receipt struct {
 
 // PipelineWorkflow reserves stock, charges against that reservation, and ships
 // against that charge.
-func PipelineWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-	var a *Activities
+func PipelineWorkflow(ctx workflow.Context, in activity.Order) (Receipt, error) {
+	var a *activity.Activities
 
 	return saga.Run(ctx, saga.Options{
 		ActivityOptions: workflow.ActivityOptions{
@@ -48,11 +45,11 @@ func PipelineWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		},
 		CompensationBudget: time.Minute,
 	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
+		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), activity.ReserveReq{Order: in})
 
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in, Reservation: res})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), activity.ChargeReq{Order: in, Reservation: res})
 
-		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in, Charge: chg})
+		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), activity.ShipReq{Order: in, Charge: chg})
 
 		return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
 	})

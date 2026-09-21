@@ -10,8 +10,7 @@ import (
 	"github.com/cucumber/godog"
 	"go.temporal.io/sdk/client"
 
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/approval"
-	"github.com/yamakura-yuma/temporal-workflow-kit/example/order"
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/approval"
 )
 
 func registerApprovalSteps(sc *godog.ScenarioContext) {
@@ -38,7 +37,7 @@ func registerApprovalSteps(sc *godog.ScenarioContext) {
 
 func (s *scenarioState) startApproval(id string, waitSeconds int) error {
 	in := approval.Request{
-		Order:       order.Order{ID: id, SKU: "widget", Amount: 4200},
+		Order:       sampleLine(id, ""),
 		WaitSeconds: waitSeconds,
 	}
 

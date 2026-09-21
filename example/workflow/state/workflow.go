@@ -1,11 +1,11 @@
 // Package state is the example for keeping the body of a saga short.
 //
-// Once a saga has five steps and the requests its activities take have more
-// than a couple of fields, a saga written inline turns into a wall: every
-// saga.Step call carries a struct literal that restates half of the workflow
-// input, the ids the earlier steps returned become plumbing threaded through
-// the body, and the order of the steps -- the one thing a reader opens a saga
-// to find -- is buried in all of it.
+// This saga has five steps and an input far wider than any one of them needs.
+// Written inline, every saga.Step call has to project that input down to the
+// request the activity takes, and the ids the earlier steps returned have to be
+// carried by hand from the step that produced them to the step that needs them.
+// The order of the steps -- the one thing a reader opens a saga to find -- ends
+// up buried in the plumbing.
 //
 // Here the workflow input and everything the steps produce live in one struct,
 // each step is a method on it, and the closure passed to saga.Run is two lines.
@@ -26,6 +26,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
@@ -41,8 +42,9 @@ const ApprovalSignal = "approval"
 // a caller can tell it apart from a step that broke.
 const DeniedType = "ApprovalDenied"
 
-// Order is the workflow input. It has enough fields that restating them at
-// every step is the problem this example is about.
+// Order is the workflow input. It is this wide on purpose: the activities take
+// a much narrower activity.Order, and projecting one onto the other at every
+// step is the problem this example is about.
 type Order struct {
 	ID       string `json:"id"`
 	Customer string `json:"customer"`
@@ -57,6 +59,17 @@ type Order struct {
 	WaitSeconds int `json:"wait_seconds,omitempty"`
 	// FailAt names a step whose activity should fail.
 	FailAt string `json:"fail_at,omitempty"`
+}
+
+// line is the part of the order the activities are given.
+func (o Order) line() activity.Order {
+	return activity.Order{
+		ID:       o.ID,
+		SKU:      o.SKU,
+		Quantity: o.Quantity,
+		Amount:   o.Amount,
+		FailAt:   o.FailAt,
+	}
 }
 
 // wait is how long the approve step gives a reviewer.
@@ -142,28 +155,17 @@ func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 // a no-op, and run checks s.Err() once, before building the receipt.
 
 func (w *fulfillment) reserve(ctx workflow.Context, s *saga.Saga) {
-	var a *Activities
+	var a *activity.Activities
 
-	w.reservation, _ = saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{
-		Order:    w.in.ID,
-		SKU:      w.in.SKU,
-		Quantity: w.in.Quantity,
-		Fail:     w.in.FailAt == "reserve",
-	})
+	w.reservation, _ = saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve),
+		activity.ReserveReq{Order: w.in.line()})
 }
 
 func (w *fulfillment) chargeCard(ctx workflow.Context, s *saga.Saga) {
-	var a *Activities
+	var a *activity.Activities
 
-	w.charge, _ = saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{
-		Order:       w.in.ID,
-		Customer:    w.in.Customer,
-		Amount:      w.in.Amount,
-		Currency:    w.in.Currency,
-		Coupon:      w.in.Coupon,
-		Reservation: w.reservation,
-		Fail:        w.in.FailAt == "charge",
-	})
+	w.charge, _ = saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund),
+		activity.ChargeReq{Order: w.in.line(), Reservation: w.reservation})
 }
 
 // approve waits for a reviewer. It is a Func step: the waiting is workflow
@@ -180,27 +182,17 @@ func (w *fulfillment) approve(ctx workflow.Context, s *saga.Saga) {
 }
 
 func (w *fulfillment) pack(ctx workflow.Context, s *saga.Saga) {
-	var a *Activities
+	var a *activity.Activities
 
-	w.packing, _ = saga.Step(ctx, s, "pack", saga.Activity(a.Pack), saga.UndoActivity(a.Unpack), PackReq{
-		Order:    w.in.ID,
-		SKU:      w.in.SKU,
-		Quantity: w.in.Quantity,
-		Address:  w.in.Address,
-		Fail:     w.in.FailAt == "pack",
-	})
+	w.packing, _ = saga.Step(ctx, s, "pack", saga.Activity(a.Pack), saga.UndoActivity(a.Unpack),
+		activity.PackReq{Order: w.in.line()})
 }
 
 func (w *fulfillment) ship(ctx workflow.Context, s *saga.Saga) {
-	var a *Activities
+	var a *activity.Activities
 
-	w.shipment, _ = saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{
-		Order:      w.in.ID,
-		Address:    w.in.Address,
-		Charge:     w.charge,
-		ApprovedBy: w.approvedBy,
-		Fail:       w.in.FailAt == "ship",
-	})
+	w.shipment, _ = saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment),
+		activity.ShipReq{Order: w.in.line(), Charge: w.charge, Pack: w.packing, ApprovedBy: w.approvedBy})
 }
 
 // ApproveReq is the input of the approve step. The step is a Func, so this

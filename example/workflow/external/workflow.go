@@ -11,6 +11,9 @@
 // dedicated constructor would have been for. What the saga still guarantees is
 // the pairing -- if the saga fails after the hold was sent, the release is
 // sent.
+//
+// The charge step is one of the shared activities from example/activity/, and
+// it is only here so the saga has something to fail at after the hold.
 package external
 
 import (
@@ -19,6 +22,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
 
@@ -53,15 +57,11 @@ func sendRelease(ctx workflow.Context, req HoldReq) error {
 	return workflow.SignalExternalWorkflow(ctx, req.Inventory, "", ReleaseSignal, req).Get(ctx, nil)
 }
 
-// Order is the saga's input.
-type Order struct {
-	ID string `json:"id"`
+// Request is the saga's input.
+type Request struct {
+	Order activity.Order `json:"order"`
 	// Inventory is the workflow id of the inventory workflow to signal.
 	Inventory string `json:"inventory"`
-	SKU       string `json:"sku"`
-	Quantity  int    `json:"quantity"`
-	Amount    int    `json:"amount"`
-	FailAt    string `json:"fail_at,omitempty"`
 }
 
 // Receipt is the saga's output.
@@ -71,8 +71,8 @@ type Receipt struct {
 
 // ExternalWorkflow holds stock in another workflow, then charges. If the charge
 // fails, the hold is released by the signal registered alongside it.
-func ExternalWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-	var a *Activities
+func ExternalWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
+	var a *activity.Activities
 
 	return saga.Run(ctx, saga.Options{
 		ActivityOptions: workflow.ActivityOptions{
@@ -84,9 +84,9 @@ func ExternalWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 		// Sending a signal is a Func step: the library has no key to put on it
 		// and no timeout to clamp, so a constructor of its own would be this
 		// with extra vocabulary.
-		saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{Inventory: in.Inventory, Order: in.ID, SKU: in.SKU, Quantity: in.Quantity})
+		saga.Step(ctx, s, "hold", saga.Func(sendHold), saga.UndoFunc(sendRelease), HoldReq{Inventory: in.Inventory, Order: in.Order.ID, SKU: in.Order.SKU, Quantity: in.Order.Quantity})
 
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in.ID, Amount: in.Amount, Fail: in.FailAt == "charge"})
+		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), activity.ChargeReq{Order: in.Order})
 
 		return Receipt{Charge: chg}, nil
 	})

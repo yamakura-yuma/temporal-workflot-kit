@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>order — 基本形 — temporal-workflow-kit example</title>
+<title>state — Run の中を短く保つ — temporal-workflow-kit example</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -75,10 +75,10 @@
 <body>
 <div class="wrap">
 
-<nav>example/ &nbsp;<a href="diagram.html" class="here">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="../state/diagram.html">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
+<nav>example/ &nbsp;<a href="../order/diagram.html">order</a> · <a href="../pipeline/diagram.html">pipeline</a> · <a href="diagram.html" class="here">state</a> · <a href="../childflow/diagram.html">childflow</a> · <a href="../approval/diagram.html">approval</a> · <a href="../external/diagram.html">external</a></nav>
 
-<h1>order — 基本形<span class="path">example/order/</span></h1>
-<p>在庫を押さえ、課金し、配送を手配する。どれかが失敗したら、<strong>そこまでに起きたことを逆順で取り消す</strong>。他の4つはこの形からの派生です。</p>
+<h1>state — Run の中を短く保つ<span class="path">example/workflow/state/</span></h1>
+<p>アクティビティの入力が増えると、ステップを並べただけのワークフローは読めなくなります。入力と各ステップの出力を1つの構造体に持たせ、ステップをそのメソッドにします。</p>
   <div class="legend">
     <span><i class="sw" style="background:var(--fwd-bg);border-color:var(--fwd)"></i> forward</span>
     <span><i class="sw" style="background:var(--undo-bg);border-color:var(--undo)"></i> 補償</span>
@@ -87,91 +87,87 @@
     <span><i class="sw" style="background:var(--surface-2);border-color:var(--ink-3)"></i> 実行されない</span>
   </div>
 
-<h2>正常系</h2>
+<h2>コードの形</h2>
+<p>これだけは実行時の経路ではなく、<strong>書き方</strong>の話です。</p>
 <div class="strip">
-  <div class="lane"><span class="tag">forward</span></div>
+  <div class="lane"><span class="tag">Run の body</span><span class="note">2行</span></div>
   <div class="row">
-    <div class="cell f">reserve<span class="sub2">Reserve</span></div>
+    <div class="cell f" style="flex:0 0 auto;padding:9px 18px">w := &amp;fulfillment{in: in}<span class="sub2">return w.run(ctx, s)</span></div>
     <div class="arr">→</div>
-    <div class="cell f">charge<span class="sub2">Charge</span></div>
+    <div class="cell s" style="flex:0 0 auto;padding:9px 18px">fulfillment<span class="sub2">in / reservation / charge / approvedBy / packing / shipment</span></div>
+  </div>
+  <div class="fail-mark q">▼ ステップはメソッド。state から入力を組み、結果を state に戻す</div>
+  <div class="row">
+    <div class="cell f">w.reserve<span class="sub2">→ w.reservation</span></div>
     <div class="arr">→</div>
-    <div class="cell f">ship<span class="sub2">Ship</span></div>
+    <div class="cell f">w.chargeCard<span class="sub2">w.reservation を使う</span></div>
     <div class="arr">→</div>
-    <div class="cell g">Receipt</div>
+    <div class="cell w">w.approve<span class="sub2">signal を待つ／Func</span></div>
+    <div class="arr">→</div>
+    <div class="cell f">w.pack</div>
+    <div class="arr">→</div>
+    <div class="cell f">w.ship<span class="sub2">w.charge と w.approvedBy を使う</span></div>
   </div>
 </div>
 
-<h2>ship で失敗したとき</h2>
-<div class="strip">
-  <div class="lane"><span class="tag">forward</span></div>
-  <div class="row">
-    <div class="cell f">reserve</div>
-    <div class="arr">→</div>
-    <div class="cell f">charge</div>
-    <div class="arr">→</div>
-    <div class="cell u">ship ✕<span class="sub2">no carrier</span></div>
-  </div>
-  <div class="fail-mark">▼ 逆順で巻き戻す</div>
-  <div class="lane"><span class="tag">補償</span><span class="note">失敗したステップ自身も取り消す</span></div>
-  <div class="row">
-    <div class="cell u">reserve:undo<span class="sub2">Unreserve</span></div>
-    <div class="arr">←</div>
-    <div class="cell u">charge:undo<span class="sub2">Refund</span></div>
-    <div class="arr">←</div>
-    <div class="cell u">ship:undo<span class="sub2">CancelShipment</span></div>
-  </div>
+<pre><code>func (w *fulfillment) run(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+    w.reserve(ctx, s)
+    w.chargeCard(ctx, s)
+    w.approve(ctx, s)
+    w.pack(ctx, s)
+    w.ship(ctx, s)
+
+    if err := s.Err(); err != nil {     // 分岐と戻り値の前に1回だけ見る
+        return Receipt{}, err
+    }
+    return Receipt{Reservation: w.reservation, Charge: w.charge, ApprovedBy: w.approvedBy,
+        Pack: w.packing, Shipment: w.shipment}, nil
+}</code></pre>
+
+<div class="note-box">
+  <strong>state 構造体そのものを <code>Step</code> に渡すことはできません。</strong>
+  <code>Step</code> の入力はアクティビティの引数なので、シリアライズ可能である必要が
+  あります。メソッドの中で state からリクエストを組んでください。
 </div>
 
 <div class="note-box">
-  <strong>失敗した ship も補償されます。</strong> 補償はステップを実行する<em>前</em>に
-  登録されるからです。タイムアウトで失敗したアクティビティは、結果を返せなかっただけで
-  ワーカー上では完走しているかもしれません。<code>ship:undo</code> は「何も予約されて
-  いない」と分かれば no-op で成功します。
+  <strong>同じ saga を素の形でも書いてあります。</strong>
+  <code>workflow_flat.go</code> は上と同じ5ステップを <code>saga.Run</code> の
+  クロージャに並べたもので、違うのは本体の書き方だけです。2つを並べて読むためのもので、
+  仕様が両方を動かして同じ <code>Receipt</code> が返ることを確かめています。
 </div>
 
-<div class="spec"><b>## 失敗すると、失敗したステップを含めて逆順に取り消される</b>
-
-* "ship" で失敗する注文 "rollback"
-* saga は "no carrier available" で失敗する
-* ステップ "reserve, charge, ship, ship:undo, charge:undo, reserve:undo" が実行された
-* 注文は "reserve, charge, ship" を保持していない</div>
-
-<h2>キャンセルされたとき</h2>
-<p>
-  このライブラリの存在理由にあたる経路。キャンセル済みの context は以降のアクティビティを
-  即座に失敗させるので、<strong>補償は切り離した context で実行</strong>します。
-</p>
+<h2>巻き戻しは基本形と同じ</h2>
+<p>書き方を変えてもロールバックが弱くなっていないこと、が仕様で見たいことです。
+approve はアクティビティではないので、履歴にも巻き戻しにも現れません。</p>
 <div class="strip">
   <div class="row">
-    <div class="cell f">reserve</div>
-    <div class="arr">→</div>
-    <div class="cell f">charge</div>
-    <div class="arr">→</div>
-    <div class="cell w">待機中<span class="sub2">workflow.Sleep</span></div>
-    <div class="arr">→</div>
-    <div class="cell u">✕ Cancel</div>
+    <div class="cell f">reserve</div><div class="arr">→</div>
+    <div class="cell f">charge</div><div class="arr">→</div>
+    <div class="cell f">pack</div><div class="arr">→</div>
+    <div class="cell u">ship ✕</div>
   </div>
-  <div class="fail-mark">▼ NewDisconnectedContext で実行</div>
+  <div class="fail-mark">▼</div>
   <div class="row">
-    <div class="cell u">reserve:undo</div>
-    <div class="arr">←</div>
-    <div class="cell u">charge:undo</div>
-    <div class="arr">←</div>
-    <div class="cell x">ship:undo<span class="sub2">未登録（ship は始まっていない）</span></div>
+    <div class="cell u">reserve:undo</div><div class="arr">←</div>
+    <div class="cell u">charge:undo</div><div class="arr">←</div>
+    <div class="cell u">pack:undo</div><div class="arr">←</div>
+    <div class="cell u">ship:undo</div>
   </div>
 </div>
 
-<div class="spec"><b>## キャンセルされた saga もロールバックされる</b>
+<div class="spec"><b>シナリオ: 最後で失敗すれば、4つ分が逆順で取り消される</b>
 
-* 課金の後で待機する注文 "cancelme"
-* "charge" が実行されたら saga をキャンセルする
-* ステップ "reserve, charge, charge:undo, reserve:undo" が実行された
-* 注文は "reserve, charge" を保持していない</div>
+  前提 状態を持つ注文 "half" を "ship" で失敗させる
+  もし 状態を持つ注文の承認を送る
+  ならば saga は "no carrier" で失敗する
+  かつ ステップ "reserve, charge, pack, ship, ship:undo, pack:undo, charge:undo, reserve:undo" が実行された
+  かつ 注文は "reserve, charge, pack, ship" を保持していない</div>
 
 <footer>
-  ソース: <code>example/order/</code> ／ 仕様: <code>docs/specs/</code> ／
-  形ごとの書き方: <a href="../../docs/patterns.md">patterns.md</a> ／
-  設計の理由: <a href="../../docs/design.md">design.md</a>
+  ソース: <code>example/workflow/state/</code> ／ 仕様: <code>docs/specs/</code> ／
+  形ごとの書き方: <a href="../../../docs/patterns.md">patterns.md</a> ／
+  設計の理由: <a href="../../../docs/design.md">design.md</a>
 </footer>
 
 </div>
