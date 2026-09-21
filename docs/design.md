@@ -222,17 +222,165 @@ func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 
 番号が同じなので、「この番号の課金はもう済んでいるか」「この番号の課金を返す」が書けます。
 
-### なぜ RunID とステップ名なのか
+### 既定は RunID とステップ名。`KeyFunc` で変えられる
 
-番号の作り方を間違えると、静かに壊れます。避けた案を2つ挙げます。
+#### 土台 — Temporal の想定は2層
 
-`FirstRunID` を使う案。これは ContinueAsNew や Retry を跨いでも同じ値が残るので、**2回目の
-実行が1回目の番号を再利用**してしまいます。全ステップが「もう済んでいる」と判定され、
-課金せずに成功が返る。
+鍵の話に入る前に、上流がどう考えているかを置きます。重複の排除は**2箇所**で行う想定に
+なっています。
 
-連番（1番目、2番目...）を使う案。ステップを1つ挿入すると、**それ以降の番号が全部ずれ**ます。
+| | どこで弾くか | 道具 |
+| --- | --- | --- |
+| 層1 | ワークフローが立つ前。Temporal サーバ | WorkflowID と Workflow Id Reuse / Conflict Policy |
+| 層2 | アクティビティの中 | 冪等キー（RunID + ActivityID） |
 
-`RunID + ステップ名` なら、実行ごとに違い、順番を入れ替えても変わりません。
+層1では、WorkflowID は業務識別子として扱われます。公式は WorkflowID を
+"meant to be a business-process identifier"（注文番号や顧客番号のようなもの）と位置づけ、
+"Temporal guarantees that there can be at most one Workflow Execution with a given ID
+running at any point in time" としています
+（[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
+
+層2では、冪等キーの作り方まで名指しされています。"You can use a combination of the
+Workflow Run ID and the Activity ID as an idempotency key" で、理由は "this is guaranteed
+to be consistent across retry attempts but unique among Workflow Executions"
+（[Activity definition](https://docs.temporal.io/activity-definition)）。
+
+#### 既定は発明ではなく、公式推奨そのもの
+
+`DefaultKey` は `RunID + "/" + ステップ名` を作り、それをそのステップの `ActivityID` に
+設定します。読み替えると **RunID + ActivityID** で、上の層2の推奨そのものです。ここは
+このライブラリが決めたことではありません。
+
+1点だけ公式より進んでいます。**公式の言い方を素朴に取って `ActivityID` を明示しないと、
+SDK が振るのは ScheduleID 由来の10進連番です。** ステップを1つ挿入すると、それ以降の番号が
+全部ずれます。「retry を跨いで一定」は満たしても、「コードを1行足すと変わらない」は満たし
+ません（出典は [上流由来のノート](sdk-notes.md) の `ActivityID` の行）。
+
+このライブラリは `ActivityID` を自分で決定的に決めることでそこを塞いでいます。ステップ名は
+順番を入れ替えても挿入しても変わらないので、連番のずれが起きません。**公式推奨に合わせた
+うえで、素朴に取ると踏む穴を1つ埋めた**、というのが既定の位置づけです。
+
+既定が言っているのは「**この試行が一度だけ**」です。run が変われば鍵も変わります。
+
+#### WorkflowID を鍵にする案は、公式の想定では層1の道具
+
+もう1つの作り方が `WorkflowID + ステップ名` で、こちらは「**この業務操作が一度だけ**」に
+なります。
+
+```go
+saga.Options{
+    KeyFunc: func(ctx workflow.Context, name string) string {
+        return workflow.GetInfo(ctx).WorkflowExecution.ID + "/" + name
+    },
+}
+```
+
+ただし、**二重送信を止めたいだけなら層2まで下りてくる必要はありません。** WorkflowID に
+API の Request ID（コールごとに一意な ID）を入れて Reuse / Conflict Policy を設定すれば、
+重複したリクエストは**ワークフローが立つ前に**サーバが弾きます。それが層1の仕事です。
+二重送信はそこで既に解決しているので、その目的のためだけに層2の鍵まで WorkflowID 由来に
+する理由はありません。
+
+層2まで WorkflowID 由来にして初めて塞がるのは、**同じ WorkflowID の中で run が変わる場合**
+だけです。つまり workflow の retry、reset、continue-as-new。層1は「同じ WorkflowID の
+ワークフローは同時に1本」までしか言っておらず、その1本の中で run が代わることは止めません。
+
+公式も Run Id については、"can change during Workflow Retry"、"you shouldn't rely on the
+current Run Id in your code to make logical choices" と注意しています
+（[Workflow Id and Run Id](https://docs.temporal.io/workflow-execution/workflowid-runid)）。
+既定の鍵はまさにその Run Id に乗っているので、**この注意が当たる場面が、後で見る「ワーカーが
+落ちて補償が走らないまま retry したとき」です。**
+
+#### 条件は1つ。鍵の粒度が業務操作の粒度と一致すること
+
+**冪等キーの粒度は、業務操作の粒度と一致していなければならない。条件はそれだけです。**
+WorkflowID がその粒度なら WorkflowID でよく、そうでなければだめです。
+
+つまりこれは `WorkflowID` という値の良し悪しの話ではなく、**その WorkflowID に何が入って
+いるか**の話です。
+
+| WorkflowID に入っているもの | 業務操作との関係 | 鍵に使えるか |
+| --- | --- | --- |
+| API の Request ID（コールごとに一意） | ぴったり一致する | **使える。既定より安全** |
+| 注文 ID。同じ注文に複数回ワークフローを起動しうる運用 | 粗い | 2回目以降が全ステップ skip する |
+| cron のワークフロー（WorkflowID がスケジュール単位で固定） | 粗い | 2日目以降が全ステップ skip する |
+
+粗い側に外れると、**処理が黙って飛びます**。エラーは出ません。全ステップが「もう済んで
+いる」と判定され、何もせずに成功が返るだけです。
+
+#### 既定が `RunID` である理由
+
+ライブラリは、**WorkflowID に何が入っているかを知りません。** それを決めるのは利用者なので、
+粒度が一致しているかどうかをライブラリ側では判定できません。
+
+`RunID` は必ず「1実行」の粒度です。業務操作と**同じか、細かい側にしか外れません。** そして
+細かい側に外れても、既定では害が出ません。Temporal のワークフローは既定では retry policy を
+持たない（`StartWorkflowOptions.RetryPolicy` は任意で、渡さなければ1回失敗したらそこで
+終わる）ので run は1本しかなく、「この試行が一度だけ」と「この業務操作が一度だけ」が同じ
+ことを言っている状態になるからです。
+
+一方、粗い側に外れると処理が黙って飛びます。**既定は「黙って飛ぶ」ほうを避けています。**
+
+粒度が一致していると言えるのは利用者だけです。言えるなら、`KeyFunc` でそう言ってください。
+
+#### 細かい側に外れると、今度は既定のほうが危ない
+
+retry が起きる設定にすると、細かい側の外れが実害になります。WorkflowID は run の連鎖
+（ContinueAsNew・Retry・Cron・Reset）を跨いで同じで RunID だけが変わるので、2つの差が
+出るのは**同じワークフローが2本目の run を作ったとき**、つまり workflow 自身の retry と
+reset のときです。
+
+ワーカーが落ちて補償が走らないまま workflow が retry されると、新しい RunID から新しい鍵が
+生まれます。前の試行が立てた課金は台帳（あるいは下流）に残ったままなのに、新しい鍵では
+「まだ誰も課金していない」と見えるので、**立っている課金の上にもう一度課金します**。
+
+```
+run 1  charge で "run1/charge" を claim → 課金が立つ
+       ワーカーが落ちる。補償は走らない
+run 2  charge で "run2/charge" を claim → 未使用に見える → 二重課金
+```
+
+WorkflowID 由来の鍵なら、鍵は `wf/charge` のまま変わりません。run 2 は前の試行が残したもの
+（業務行、下流の記録、台帳の claim のどれか）を見つけて skip します。逆に**補償が完走して
+いればそれは消えている**ので、run 2 は普通に課金をやり直します。
+
+つまり WorkflowID 由来の鍵は、「**補償できた分はやり直す、できなかった分は触らない**」に
+自然に落ちます。retry を有効にするなら、粒度が一致している限りこちらです。
+
+#### WorkflowIDReusePolicy もセットで決める
+
+WorkflowID を鍵にするなら、**同じ WorkflowID で2本目の run が立つ条件**も一緒に決める必要が
+あります。`WorkflowIDReusePolicy` の既定は `AllowDuplicate` で、完了済みの WorkflowID なら
+新しい run を受け付けます。
+
+効いてくるのは、1本目が失敗して補償まで完走した後です。鍵は同じでも副作用は補償で消えて
+いるので、クライアントが同じ Request ID で API を叩き直して2本目が立つと、業務操作は
+やり直されます。「1回だけ」のつもりで送り直したのに2回実行された、という形になりうる。
+**ステップ単位の鍵が run を跨いで同じでも、業務操作を1回に閉じるのは鍵ではなく起動側の
+方針です。** `RejectDuplicate` にする、あるいは走行中の扱いを `WorkflowIDConflictPolicy` で
+決める、のどちらかが要ります。
+
+#### `KeyFunc` に載る制約
+
+自分で書くなら3つ守ってください。
+
+- **決定的であること。** 同じ run の同じステップ名から、リプレイ後も同じ鍵が出ること
+- **`FirstRunID` を使わないこと。** これも ContinueAsNew・Retry・Cron・Reset を跨いで残る
+  ので、結果は WorkflowID 由来の鍵とほぼ同じになります。違うのは**選べるかどうか**です。
+  値はサーバが振るので中身に意味を持たせられず、同じ鍵がいつ生まれ直すかを
+  `WorkflowIDReusePolicy` のような形で決める手段もありません。「業務操作が一度だけ」が
+  欲しいなら、自分で中身を決められる WorkflowID を使ってください
+- **数字だけにしないこと。** `ActivityID` を明示しないアクティビティには SDK が純粋な10進数
+  を振るので、数字だけの鍵は無関係なアクティビティとぶつかります。Request ID が数字だけ
+  でも `+ "/" + ステップ名` が付くので、この制約は満たします
+
+3つ目は、SDK 既定の連番と同じ穴です。自分で連番（1番目、2番目...）を振る案も、決定的では
+ありますが同じ理由で駄目で、ステップを1つ挿入すると以降が全部ずれます。ステップ名なら、
+挿入しても順番を入れ替えても変わりません。
+
+もう一度書くと、条件は**鍵の粒度が業務操作の粒度と一致していること**、それだけです。既定の
+`RunID` は、何が入っているか分からない値を避けて、粒度を判定できるほうを選んだ結果です。
+一致していると言える立場にいるなら、`KeyFunc` でそう言うほうが強い鍵になります。
 
 ---
 

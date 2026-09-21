@@ -44,13 +44,21 @@ type Options struct {
 	StopOnCompensationError bool
 
 	// KeyFunc derives the idempotency key for a step. The default is
-	// RunID + "/" + name.
+	// RunID + "/" + name, which means "this attempt happens once".
+	//
+	// WorkflowExecution.ID + "/" + name means "this business operation happens
+	// once" instead. The only condition on a key is that its grain match the
+	// grain of the business operation, so use it when the WorkflowID has that
+	// grain -- a per-request ID does; an ID reused across several workflows,
+	// such as an order ID or a cron schedule, is coarser, and every step of the
+	// second workflow would be skipped. See docs/design.md.
 	//
 	// It must be deterministic: the same workflow run must produce the same key
-	// for the same step name on replay. Do not key on FirstRunID -- that value
-	// is preserved across ContinueAsNew, Retry, Cron and Reset, so a second run
-	// would reuse the first run's keys and every step would be mistaken for one
-	// that already ran.
+	// for the same step name on replay. Do not key on FirstRunID -- it is
+	// preserved across ContinueAsNew, Retry, Cron and Reset much as WorkflowID
+	// is, but the server picks its value, so a second run reuses the first
+	// run's keys whether or not that was the intent. Key on
+	// WorkflowExecution.ID when you do intend it.
 	//
 	// The key must contain a non-digit character. An activity with no explicit
 	// ActivityID gets a plain decimal one from the SDK, so a purely numeric key
