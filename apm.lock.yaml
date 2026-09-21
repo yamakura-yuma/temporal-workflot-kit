@@ -1424,7 +1424,7 @@ deployments:
   content_hash: sha256:1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2
 - kind: project-relative
   target: claude
-  value: .claude/skills/saga-workflows
+  value: .claude/skills/saga-package
   runtime: null
   scope: project
   owners:
@@ -1433,22 +1433,13 @@ deployments:
   content_hash: null
 - kind: project-relative
   target: claude
-  value: .claude/skills/saga-workflows/SKILL.md
+  value: .claude/skills/saga-package/SKILL.md
   runtime: null
   scope: project
   owners:
   - .
   active_owner: .
-  content_hash: sha256:3975b8cf49550595399775a665db8c4b14bc2b85471757f5a9148622af8c5754
-- kind: project-relative
-  target: claude
-  value: .claude/skills/saga-workflows/references/checklist.md
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:43f7a3416ad7bcbdbbae611f4eb0fd4bc234f1f7a4cf87537a66e6a9a4077cdf
+  content_hash: sha256:a5dccce6ea6dd8544ef309b1afc5c48467fb12119c1a463c0de28e1ccc3a8fee
 - kind: project-relative
   target: claude
   value: .claude/skills/show-me
@@ -1541,6 +1532,33 @@ deployments:
   content_hash: sha256:5856f3ae8aec742f1499c640aecdd5f1d6af5fa210a7c6ec794de8263a6f733f
 - kind: project-relative
   target: claude
+  value: .claude/skills/temporal-review
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/temporal-review/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:3a9a388d57aa4c3550f132311870c49adc50dd90a0bfbb6dd70ef0d935dc683b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/temporal-review/references/checklist.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:915ed6d2fbeb1f6c4b8c7324643a879c5d3ee88d2dcca8de9b8948fabec19010
+- kind: project-relative
+  target: claude
   value: .claude/skills/to-questionnaire
   runtime: null
   scope: project
@@ -1566,6 +1584,24 @@ deployments:
   - mattpocock/skills/skills/productivity/to-questionnaire
   active_owner: mattpocock/skills/skills/productivity/to-questionnaire
   content_hash: sha256:9e8a06c38c8842eea8d4922cb9d1ead8e3ace647bab259b943c994a1b4742bc2
+- kind: project-relative
+  target: claude
+  value: .claude/skills/upstream-docs
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/upstream-docs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b8510beafc31d82faf16dc90efc7c7cdb44b76522858d5e0e11b488078996c71
 - kind: project-relative
   target: claude
   value: .claude/skills/wait-what
@@ -1630,9 +1666,15 @@ deployments:
   active_owner: mattpocock/skills/skills/productivity/writing-for-agents
   content_hash: sha256:eacb24b2a618cfb81dacb0416f4fdd75ddf3a8060f8ddb99aae1b1e301907e4b
 local_deployed_files:
-- .claude/skills/saga-workflows
-- .claude/skills/saga-workflows/SKILL.md
-- .claude/skills/saga-workflows/references/checklist.md
+- .claude/skills/saga-package
+- .claude/skills/saga-package/SKILL.md
+- .claude/skills/temporal-review
+- .claude/skills/temporal-review/SKILL.md
+- .claude/skills/temporal-review/references/checklist.md
+- .claude/skills/upstream-docs
+- .claude/skills/upstream-docs/SKILL.md
 local_deployed_file_hashes:
-  .claude/skills/saga-workflows/SKILL.md: sha256:3975b8cf49550595399775a665db8c4b14bc2b85471757f5a9148622af8c5754
-  .claude/skills/saga-workflows/references/checklist.md: sha256:43f7a3416ad7bcbdbbae611f4eb0fd4bc234f1f7a4cf87537a66e6a9a4077cdf
+  .claude/skills/saga-package/SKILL.md: sha256:a5dccce6ea6dd8544ef309b1afc5c48467fb12119c1a463c0de28e1ccc3a8fee
+  .claude/skills/temporal-review/SKILL.md: sha256:3a9a388d57aa4c3550f132311870c49adc50dd90a0bfbb6dd70ef0d935dc683b
+  .claude/skills/temporal-review/references/checklist.md: sha256:915ed6d2fbeb1f6c4b8c7324643a879c5d3ee88d2dcca8de9b8948fabec19010
+  .claude/skills/upstream-docs/SKILL.md: sha256:b8510beafc31d82faf16dc90efc7c7cdb44b76522858d5e0e11b488078996c71
