@@ -549,9 +549,27 @@ func TestChildWorkflowCompensatesInOneOrder(t *testing.T) {
 
 // waitStep is the wait written the way the library intends: a step of its own,
 // which decides for itself what a missing signal means.
+// awaitSignal is what the library used to export. It is a plain SDK idiom, so
+// the tests carry their own copy rather than the package doing it for everyone.
+func awaitSignal[T any](ctx workflow.Context, name string, timeout time.Duration) (T, bool) {
+	var payload T
+	arrived := false
+
+	selector := workflow.NewSelector(ctx)
+	selector.AddReceive(workflow.GetSignalChannel(ctx, name),
+		func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &payload)
+			arrived = true
+		})
+	selector.AddFuture(workflow.NewTimer(ctx, timeout), func(workflow.Future) {})
+	selector.Select(ctx)
+
+	return payload, arrived
+}
+
 func waitStep(out *string) func(workflow.Context) error {
 	return func(ctx workflow.Context) error {
-		payload, arrived := saga.AwaitSignal[string](ctx, "never", time.Hour)
+		payload, arrived := awaitSignal[string](ctx, "never", time.Hour)
 		if !arrived {
 			return temporal.NewApplicationError("nobody answered", "NoAnswer", nil)
 		}
@@ -655,7 +673,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 				return workflow.ExecuteActivity(ctx, a.Undo, req{Step: "reserve"}).Get(ctx, nil)
 			})
 
-		_, ok := saga.AwaitSignal[string](ctx, "approval", time.Second)
+		_, ok := awaitSignal[string](ctx, "approval", time.Second)
 		if !ok {
 			if clear {
 				s.Clear() // 「握って自分のエラーを返す」と宣言する

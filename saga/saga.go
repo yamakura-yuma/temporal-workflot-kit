@@ -70,7 +70,7 @@ type undo struct {
 // side effects half applied.
 //
 // A step's failure also outranks an error the body returns on its own. Once a
-// step has failed, later steps are no-ops and AwaitSignal returns at once, so
+// step has failed, later steps are no-ops and a wait returns at once, so
 // the body tends to reach a branch that reads a zero value and reports
 // something untrue -- "nobody approved this" when the truth is "the
 // reservation failed". Run reports the step's failure instead. Call s.Clear()

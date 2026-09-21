@@ -56,7 +56,7 @@ func FlatWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
 
 			s.Step(ctx, "approve",
 				func(ctx workflow.Context) error {
-					decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, in.wait())
+					decision, ok := awaitDecision(ctx, in.wait())
 					if !ok {
 						return temporal.NewApplicationError(
 							"nobody reviewed order "+in.ID+" in time", DeniedType, nil)

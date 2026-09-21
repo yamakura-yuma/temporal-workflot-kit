@@ -165,7 +165,7 @@ func (w *fulfillment) refund(ctx workflow.Context) error {
 // approve waits for a reviewer. It runs no activity, so there is nothing in the
 // history for it and nothing to undo.
 func (w *fulfillment) approve(ctx workflow.Context) error {
-	decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, w.in.wait())
+	decision, ok := awaitDecision(ctx, w.in.wait())
 	if !ok {
 		return temporal.NewApplicationError(
 			"nobody reviewed order "+w.in.ID+" in time", DeniedType, nil)
@@ -197,4 +197,34 @@ func (w *fulfillment) ship(ctx workflow.Context) error {
 func (w *fulfillment) cancelShipment(ctx workflow.Context) error {
 	return workflow.ExecuteActivity(ctx, acts.CancelShipment,
 		activity.ShipReq{Order: w.in.line(), Charge: w.charge, Shipment: w.shipment}).Get(ctx, nil)
+}
+
+// awaitDecision waits for a reviewer and reports whether one answered before
+// the timeout.
+//
+// It is ordinary workflow code -- a selector over the signal channel and a
+// timer -- and the saga library has nothing to do with it. That is why it lives
+// here: waiting has no side effect, carries no idempotency key and has nothing
+// to undo, so there would be nothing for a saga package to add.
+func awaitDecision(ctx workflow.Context, timeout time.Duration) (Decision, bool) {
+	var decision Decision
+	arrived := false
+
+	selector := workflow.NewSelector(ctx)
+	selector.AddReceive(workflow.GetSignalChannel(ctx, ApprovalSignal),
+		func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, &decision)
+			arrived = true
+		})
+	selector.AddFuture(workflow.NewTimer(ctx, timeout), func(workflow.Future) {})
+
+	selector.Select(ctx)
+
+	if !arrived {
+		// Distinguishes a cancellation from a plain timeout in the logs; either
+		// way the wait is over and nothing arrived.
+		workflow.GetLogger(ctx).Info("no decision arrived",
+			"canceled", ctx.Err() != nil)
+	}
+	return decision, arrived
 }

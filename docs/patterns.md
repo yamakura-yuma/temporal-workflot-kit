@@ -44,7 +44,7 @@ workflow.ExecuteChildWorkflow(ctx, PackWorkflow, req).Get(ctx, &w.packing)
 workflow.SignalExternalWorkflow(ctx, id, "", HoldSignal, req).Get(ctx, nil)
 
 // 何も実行しない。signal を待つだけ
-saga.AwaitSignal[Decision](ctx, ApprovalSignal, wait)
+awaitDecision(ctx, wait)   // 自分で書く。下を参照
 ```
 
 **forward と補償で別々にしてかまいません。** `example/workflow/childflow/` は荷造りを子
@@ -158,13 +158,17 @@ s.Step(ctx, "reserve",
 
 ## signal を待つ
 
-待つ処理も**ステップにします**。半分はただの関数なので、`AwaitSignal` を呼んで判断するだけです。
+待つ処理も**ステップにします**。半分はただの関数なので、signal を待って判断するだけです。
+
+待つこと自体はライブラリの仕事ではありません。副作用が無く、冪等キーも載らず、取り消すものも
+無いので、saga が足せるものが何もない。素の `workflow.NewSelector` で書きます
+（実物は [`example/workflow/approval/`](../example/workflow/approval/) の `awaitDecision`）。
 
 ```go
 s.Step(ctx, "approval", w.await, nil)   // 待ったことに取り消しは無いので nil
 
 func (w *fulfillment) await(ctx workflow.Context) error {
-    decision, ok := saga.AwaitSignal[Decision](ctx, ApprovalSignal, w.wait())
+    decision, ok := awaitDecision(ctx, w.wait())
     if !ok {
         return temporal.NewApplicationError("nobody reviewed it", DeniedType, nil)
     }

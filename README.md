@@ -156,7 +156,6 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 | `saga.RunOrCompensate(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
 | `s.Step(ctx, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
 | `saga.StepKey(ctx, name)` | 1回の実行の1ステップに固有の文字列。冪等キーに使う |
-| `saga.AwaitSignal[T](ctx, name, timeout)` | signal を待つ。`saga.Func` の中で使う |
 | `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 
