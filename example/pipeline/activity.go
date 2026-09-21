@@ -1,44 +1,14 @@
-// Package pipeline is the example for a saga whose steps feed each other: the
-// reservation id goes into the charge, and the charge id goes into the
-// shipment.
-//
-// The point is what that does to the compensations. A compensation is given the
-// same input as the step it undoes, so it gets the upstream ids for free --
-// which matters, because the compensation is registered before the step runs
-// and therefore cannot see that step's output.
 package pipeline
 
 import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
 
 	"github.com/yamakura-yuma/temporal-workflow-kit/saga"
 )
-
-// TaskQueue is shared between the worker and whoever starts the workflow.
-const TaskQueue = "saga-pipeline"
-
-// Order is the workflow input.
-type Order struct {
-	ID     string `json:"id"`
-	SKU    string `json:"sku"`
-	Amount int    `json:"amount"`
-	// FailAt names a step whose forward call should fail.
-	FailAt string `json:"fail_at,omitempty"`
-}
-
-// Receipt is the workflow output.
-type Receipt struct {
-	Reservation string `json:"reservation"`
-	Charge      string `json:"charge"`
-	Shipment    string `json:"shipment"`
-}
 
 // Each request carries what the step before it produced. The compensation of a
 // step receives the same struct, so it can undo the work against the upstream
@@ -58,28 +28,6 @@ type (
 		Charge string `json:"charge"`
 	}
 )
-
-// PipelineWorkflow reserves stock, charges against that reservation, and ships
-// against that charge.
-func PipelineWorkflow(ctx workflow.Context, in Order) (Receipt, error) {
-	var a *Activities
-
-	return saga.Run(ctx, saga.Options{
-		ActivityOptions: workflow.ActivityOptions{
-			StartToCloseTimeout: 10 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-		},
-		CompensationBudget: time.Minute,
-	}, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
-		res, _ := saga.Step(ctx, s, "reserve", saga.Activity(a.Reserve), saga.UndoActivity(a.Unreserve), ReserveReq{Order: in})
-
-		chg, _ := saga.Step(ctx, s, "charge", saga.Activity(a.Charge), saga.UndoActivity(a.Refund), ChargeReq{Order: in, Reservation: res})
-
-		shp, _ := saga.Step(ctx, s, "ship", saga.Activity(a.Ship), saga.UndoActivity(a.CancelShipment), ShipReq{Order: in, Charge: chg})
-
-		return Receipt{Reservation: res, Charge: chg, Shipment: shp}, nil
-	})
-}
 
 // Ledger records what each activity did, and what each compensation saw.
 type Ledger struct {

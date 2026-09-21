@@ -39,6 +39,8 @@ Temporal のワークフローを書くための Go の部品集。今入って�
 - `example/external/` — signal で他のワークフローを動かす例（`saga.Func`）
 
 example は1テーマ1個。増やすときもこの単位を守り、`diagram.html` も一緒に置く。
+example の入口は `workflow.go`。アクティビティとその裏の台帳は `activity.go`。
+自前のアクティビティを持たない example は `workflow.go` だけでよい。
 
 ここにアプリケーションは無く、`internal/` も無い。このリポジトリはライブラリであり、
 `internal/` に置いたライブラリはモジュールの外から import できないため。

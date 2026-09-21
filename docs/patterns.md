@@ -101,6 +101,17 @@ func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
 入力と各ステップの出力を1つの構造体に持たせ、ステップをメソッドにすると、`Run` に渡す
 クロージャは2行になります。
 
+### いつ切り替えるか
+
+次のどれかに当たったら state 形にします。
+
+- ステップが4つ以上ある
+- 同じ入力を3つ以上のステップで使い回す
+- 前段の出力を2段以上先のステップへ渡す
+
+どれにも当たらないなら素の形（[`example/order/`](../example/order/)）のままでよく、
+state 形にしても構造体とメソッドの分だけ間接が増えます。
+
 ```go
 return saga.Run(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
     w := &fulfillment{in: in}
