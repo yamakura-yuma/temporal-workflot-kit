@@ -99,7 +99,7 @@ dev server を起動して確かめます。
 | キャンセル対応 | ワークフローがキャンセルされても補償は実行される |
 | 冪等キーの払い出し | ステップごとにキーを作り、forward と補償の両方に渡す |
 | 補償の時間制限 | 補償フェーズ全体に上限を設ける。実行できなかった補償は報告する |
-| 失敗の報告 | 補償が失敗したら、型付きのエラーと検索属性で残す。元のエラーは消さない |
+| 失敗の報告 | 補償が失敗したら、型付きのエラーと、どのステップかの一覧で残す。元のエラーは消さない |
 | 型安全なステップ | `fwd` と `undo` の取り違えはコンパイルエラーになる |
 | ステップの種類を選べる | アクティビティ / 子ワークフロー / 自分の関数。**forward と補償で別々に選べる**。混ざっても1つの逆順で巻き戻る |
 | 逃げ道 | `Add` で任意の取り消しを登録できる |
@@ -115,7 +115,8 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 ```
 
 必要なのは Go 1.26 以降と Temporal Go SDK v1.49 以降。サーバ側に特別な設定は要りません。
-補償の失敗を検索属性で可視化する場合だけ、そのキーをサーバに登録しておきます。
+補償の失敗を検索属性で可視化するなら、そのキーをサーバに登録したうえで、ワークフロー側で
+`saga.CompensationFailedType` を見て自分で立ててください（`example/workflow/order/`）。
 
 ## 使用方法
 
@@ -156,7 +157,7 @@ go get github.com/yamakura-yuma/temporal-workflow-kit/saga
 | `saga.RunOrCompensate(ctx, opts, body)` | saga を実行し、失敗したらロールバックする |
 | `s.Step(ctx, name, fwd, undo, in)` | forward を1つ実行し、その補償を登録する |
 | `saga.StepKey(ctx, name)` | 1回の実行の1ステップに固有の文字列。冪等キーに使う |
-| `saga.Options` | アクティビティの既定、補償の予算、鍵の作り方 |
+| `saga.Options` | `ParallelCompensation` と `ContinueWithError` の2つだけ。どちらも任意 |
 | `saga.CompensationReport` | 失敗した補償とスキップされた補償の一覧 |
 
 補償は外から誰もキャンセルできない context で走ります。**`ScheduleToCloseTimeout` を必ず

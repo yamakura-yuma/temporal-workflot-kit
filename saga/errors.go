@@ -1,5 +1,9 @@
 package saga
 
+// CompensationFailedType is the counterpart of Java's
+// Saga.CompensationException. CompensationReport is an extension: Java and PHP
+// report the exception alone, without saying which steps were left undone.
+
 import (
 	"fmt"
 	"strings"

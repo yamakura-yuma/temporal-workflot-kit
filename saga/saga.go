@@ -1,11 +1,13 @@
 package saga
 
+// This file is the part that matches the Java SDK's io.temporal.workflow.Saga
+// and the PHP port of it: a list of compensations run in reverse order, with
+// the same two options under the same names. run.go and step.go are what this
+// package adds on top; doc.go says why.
+
 import (
-	"errors"
 	"fmt"
 
-	"go.temporal.io/sdk/log"
-	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -32,12 +34,6 @@ type Options struct {
 	// reserved as well, and whatever is left unrun is reported as Skipped
 	// rather than attempted.
 	ContinueWithError bool
-
-	// CompensationFailedAttribute, when set, is flipped to true if any
-	// compensation fails or is skipped, so operators can search for sagas that
-	// need a human. It is opt-in because the key has to be registered on the
-	// server first. Compensation failures are always logged regardless.
-	CompensationFailedAttribute *temporal.SearchAttributeKeyBool
 }
 
 // Saga records the compensations for the steps that have been started, and the
@@ -54,75 +50,9 @@ type undo struct {
 	run  func(workflow.Context) error
 }
 
-// RunOrCompensate executes body as a saga and compensates it if body fails.
-//
-// The compensation phase runs on a disconnected context, so it still works when
-// the workflow itself is being canceled -- which is exactly when it matters.
-// Compensations run in reverse order of registration.
-//
-// body returning a nil error is not enough to be treated as success: if any
-// step inside it failed, Run compensates and returns that error, discarding
-// body's return value. That is deliberate. With the sticky-error behaviour of
-// Step, a caller who forgets to check an error would otherwise return a
-// half-filled result and the workflow would be recorded as completed with its
-// side effects half applied.
-//
-// A step's failure also outranks an error the body returns on its own. Once a
-// step has failed, later steps are no-ops and a wait returns at once, so
-// the body tends to reach a branch that reads a zero value and reports
-// something untrue -- "nobody approved this" when the truth is "the
-// reservation failed". Run reports the step's failure instead. Call s.Clear()
-// before returning your own error if you have handled the step failure and
-// mean to replace it.
-//
-// It compensates on the way out of body rather than from a deferred function.
-// A panic in workflow code fails the workflow task and the whole workflow is
-// replayed, so a panic is not a saga failure and there is nothing to undo: a
-// deferred rollback would undo a workflow that is about to run again.
-func RunOrCompensate[T any](ctx workflow.Context, o Options, body func(workflow.Context, *Saga) (T, error)) (T, error) {
-	var zero T
-
-	s := newSaga(o)
-
-	out, err := body(ctx, s)
-
-	// The first failure wins. A step that failed is the root cause; whatever
-	// the body returned afterwards is fallout from it -- often a branch that
-	// read a zero value and drew the wrong conclusion. Reporting the body's
-	// error instead would bury the real one.
-	//
-	// To report an error of your own after handling a step failure, call
-	// s.Clear() first. That is what it is for.
-	if s.err != nil {
-		err = s.err
-	}
-	if err == nil {
-		return out, nil
-	}
-
-	// ContinueAsNew is delivered as an error but the saga is not over, so there
-	// is nothing to undo. The SDK classifies it the same way.
-	var continueAsNew *workflow.ContinueAsNewError
-	if errors.As(err, &continueAsNew) {
-		return out, err
-	}
-
-	return zero, s.compensate(ctx, err)
-}
-
 func newSaga(o Options) *Saga {
 	return &Saga{opts: o, names: map[string]struct{}{}}
 }
-
-func (s *Saga) Err() error { return s.err }
-
-// Clear forgets the recorded error so that later steps run again, and so that
-// an error the body returns is reported instead of the step's.
-//
-// Use it only when the failure was genuinely handled. It also stops Run from
-// treating the saga as failed, so the compensations registered so far will not
-// run unless a later step fails or the body returns an error.
-func (s *Saga) Clear() { s.err = nil }
 
 // addCompensation records a compensation, the way the Java SDK's Saga does.
 // Unlike that one it is not exported: only Step calls it, and it does so before
@@ -219,16 +149,5 @@ func (s *Saga) compensate(ctx workflow.Context, cause error) error {
 	if len(failed) == 0 && len(skipped) == 0 {
 		return cause
 	}
-	s.markNeedsAttention(ctx, logger)
 	return newCompensationError(cause, failed, skipped, first)
-}
-
-func (s *Saga) markNeedsAttention(ctx workflow.Context, logger log.Logger) {
-	if s.opts.CompensationFailedAttribute == nil {
-		return
-	}
-	err := workflow.UpsertTypedSearchAttributes(ctx, s.opts.CompensationFailedAttribute.ValueSet(true))
-	if err != nil {
-		logger.Error("saga: could not set the compensation-failed search attribute", "error", err)
-	}
 }

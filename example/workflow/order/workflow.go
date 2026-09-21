@@ -10,6 +10,7 @@
 package order
 
 import (
+	"errors"
 	"time"
 
 	"go.temporal.io/sdk/temporal"
@@ -70,11 +71,8 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 	// stock reserved as well, and whatever cannot be undone is reported either
 	// way.
 	opts := saga.Options{ContinueWithError: true}
-	if in.MarkAttribute {
-		opts.CompensationFailedAttribute = &CompensationFailedAttribute
-	}
 
-	return saga.RunOrCompensate(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
+	receipt, err := saga.RunOrCompensate(ctx, opts, func(ctx workflow.Context, s *saga.Saga) (Receipt, error) {
 		w := &fulfillment{in: in.Order}
 
 		// The step errors are ignored on purpose: after the first failure every
@@ -98,6 +96,25 @@ func OrderWorkflow(ctx workflow.Context, in Request) (Receipt, error) {
 
 		return Receipt{Reservation: w.reservation, Charge: w.charge, Shipment: w.shipment}, nil
 	})
+
+	// Flagging a rollback that did not finish is ordinary workflow code, which
+	// is why the saga package does not do it: it hands back an error of a type
+	// you can match on, and the rest is one Upsert.
+	if in.MarkAttribute && rollbackFailed(err) {
+		if uerr := workflow.UpsertTypedSearchAttributes(ctx,
+			CompensationFailedAttribute.ValueSet(true)); uerr != nil {
+			workflow.GetLogger(ctx).Error("could not flag the saga", "error", uerr)
+		}
+	}
+
+	return receipt, err
+}
+
+// rollbackFailed reports whether the saga failed and its rollback did not
+// finish cleanly, as opposed to failing and being undone.
+func rollbackFailed(err error) bool {
+	var appErr *temporal.ApplicationError
+	return errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType
 }
 
 // fulfillment holds the input and what each step produced. A compensation reads

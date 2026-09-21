@@ -1,5 +1,10 @@
 package saga
 
+// This file is an extension. The Java SDK's Saga and the PHP port both leave
+// the caller to call addCompensation, and their examples call it after the
+// forward half has already succeeded. Step registers it before, which is the
+// ordering this package exists to guarantee.
+
 import "go.temporal.io/sdk/workflow"
 
 // Step registers undo, then runs do.

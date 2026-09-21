@@ -392,6 +392,25 @@ options を丸ごと差し替えると ID が黙って消えます。
 Java も PHP も `ActivityID` には触っていません。読みやすい履歴が欲しければ、利用者が
 `ActivityOptions.ActivityID` を自分で設定できます。
 
+## 補償の失敗を検索属性に立てない
+
+`Options.CompensationFailedAttribute` がありました。巻き戻しが綺麗に終わらなかったとき、
+運用が検索できるように boolean の検索属性を立てるものです。
+
+外したのは、`workflow.UpsertTypedSearchAttributes` が素の Temporal で、しかも
+**検出手段は既に公開してある**からです。`RunOrCompensate` が返すエラーの型を見れば済みます。
+
+```go
+receipt, err := saga.RunOrCompensate(ctx, opts, body)
+
+var appErr *temporal.ApplicationError
+if errors.As(err, &appErr) && appErr.Type() == saga.CompensationFailedType {
+    workflow.UpsertTypedSearchAttributes(ctx, CompensationFailedAttribute.ValueSet(true))
+}
+```
+
+外した結果、`Options` は **Java 版とちょうど同じ2つ**になりました。
+
 ## 補償の予算を持たない
 
 `Options.CompensationBudget` を必須にしていた時期があります。外しました。
