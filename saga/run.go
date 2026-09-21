@@ -28,7 +28,7 @@ import (
 // step has failed, later steps are no-ops and a wait returns at once, so
 // the body tends to reach a branch that reads a zero value and reports
 // something untrue -- "nobody approved this" when the truth is "the
-// reservation failed". Run reports the step's failure instead. Call s.Clear()
+// reservation failed". Run reports the step's failure instead. Call s.ClearErr()
 // before returning your own error if you have handled the step failure and
 // mean to replace it.
 //
@@ -49,7 +49,7 @@ func RunOrCompensate[T any](ctx workflow.Context, o Options, body func(workflow.
 	// error instead would bury the real one.
 	//
 	// To report an error of your own after handling a step failure, call
-	// s.Clear() first. That is what it is for.
+	// s.ClearErr() first. That is what it is for.
 	if s.err != nil {
 		err = s.err
 	}
@@ -72,10 +72,11 @@ func RunOrCompensate[T any](ctx workflow.Context, o Options, body func(workflow.
 // steps and let RunOrCompensate deal with the outcome.
 func (s *Saga) Err() error { return s.err }
 
-// Clear forgets the recorded error so that later steps run again, and so that
-// an error the body returns is reported instead of the step's.
+// ClearErr forgets the error Err reports, so that later steps run again and an
+// error the body returns is reported instead of the step's. It leaves the
+// compensations registered so far alone -- it clears the error, nothing else.
 //
-// Use it only when the failure was genuinely handled. It also stops Run from
-// treating the saga as failed, so the compensations registered so far will not
-// run unless a later step fails or the body returns an error.
-func (s *Saga) Clear() { s.err = nil }
+// Use it only when the failure was genuinely handled. It also stops
+// RunOrCompensate from treating the saga as failed, so those compensations will
+// not run unless a later step fails or the body returns an error.
+func (s *Saga) ClearErr() { s.err = nil }

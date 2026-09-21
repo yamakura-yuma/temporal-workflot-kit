@@ -526,7 +526,7 @@ func maskWorkflow(ctx workflow.Context, clear bool) (string, error) {
 		_, ok := awaitSignal[string](ctx, "approval", time.Second)
 		if !ok {
 			if clear {
-				s.Clear() // 「握って自分のエラーを返す」と宣言する
+				s.ClearErr() // 「握って自分のエラーを返す」と宣言する
 			}
 			return "", temporal.NewApplicationError("nobody reviewed the order in time", "ApprovalDenied", nil)
 		}

@@ -71,7 +71,7 @@
 // completing it with half its side effects applied. A step's failure also
 // outranks an error the body produced afterwards, because once a step has
 // failed the body tends to reach a branch that reads a zero value and reports
-// something untrue. Call s.Clear() before returning your own error if you have
+// something untrue. Call s.ClearErr() before returning your own error if you have
 // handled the step failure and mean to replace it.
 //
 // CompensationReport names the steps whose compensation failed or never ran.
