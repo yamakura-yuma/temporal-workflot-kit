@@ -25,17 +25,13 @@ func (a *Activities) Ship(ctx context.Context, req ShipReq) (string, error) {
 	if req.Order.FailAt == "ship" {
 		return "", fmt.Errorf("ship: no carrier available for %s", req.Order.ID)
 	}
-	a.mark(ctx)
 	return "shp-" + req.Order.ID, nil
 }
 
 // CancelShipment reverses Ship, and succeeds when nothing was booked.
 func (a *Activities) CancelShipment(ctx context.Context, req ShipReq) error {
-	a.saw.Store("ship", req.Charge)
-
 	if req.Order.FailUndo == "ship" {
 		return fmt.Errorf("cancel-shipment: carrier unreachable for %s", req.Order.ID)
 	}
-	a.unmark(ctx)
 	return nil
 }

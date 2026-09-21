@@ -11,6 +11,7 @@ import (
 	"github.com/cucumber/godog"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 
 	"github.com/yamakura-yuma/temporal-workflow-kit/example/activity"
 	"github.com/yamakura-yuma/temporal-workflow-kit/example/workflow/childflow"
@@ -72,14 +73,40 @@ func registerChildflowSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 
-		pack := activity.KeySeenBy(s.acts, "pack")
-		unpack := activity.KeySeenBy(s.acts, "unpack")
+		run, err := s.currentRun()
+		if err != nil {
+			return err
+		}
 
-		if pack == "" {
+		// What the compensation acted under. Its ActivityID is the key with
+		// ":undo" on the end, which is what saga.IdempotencyKey strips off.
+		undone := run.GetRunID() + "/pack"
+
+		// What the child passed down. The packing activity runs inside the
+		// child, so the child's own history is what records it -- and it
+		// records the value the child read with saga.IdempotencyKeyOf, not a
+		// value any activity reported about itself.
+		child, err := s.historyOf(undone, "", "")
+		if err != nil {
+			return fmt.Errorf("梱包の子の履歴を読めません: %w", err)
+		}
+		if len(child.scheduled) == 0 {
+			return errors.New("梱包の子はアクティビティを実行していません")
+		}
+
+		var packed struct {
+			Key string `json:"key"`
+		}
+		if err := converter.GetDefaultDataConverter().
+			FromPayloads(child.input[child.scheduled[0]], &packed); err != nil {
+			return fmt.Errorf("梱包の子が渡した入力を読めません: %w", err)
+		}
+
+		if packed.Key == "" {
 			return errors.New("梱包の子が冪等キーを読めていません")
 		}
-		if pack != unpack {
-			return fmt.Errorf("冪等キーが一致しません: pack=%q unpack=%q", pack, unpack)
+		if packed.Key != undone {
+			return fmt.Errorf("冪等キーが一致しません: pack=%q unpack=%q", packed.Key, undone)
 		}
 		return nil
 	})

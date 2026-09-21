@@ -15,16 +15,16 @@ func (a *Activities) Reserve(ctx context.Context, req ReserveReq) (string, error
 	if req.Order.FailAt == "reserve" {
 		return "", fmt.Errorf("reserve: no stock for %s", req.Order.SKU)
 	}
-	a.mark(ctx)
 	return "res-" + req.Order.ID, nil
 }
 
 // Unreserve releases stock held by Reserve. It succeeds when there is nothing
-// to release, which is what lets a saga register it before Reserve runs.
+// to release: a saga registers a compensation before its step runs, so this can
+// be asked to undo something that never happened. A real one gets that for free
+// from a DELETE that matches no row.
 func (a *Activities) Unreserve(ctx context.Context, req ReserveReq) error {
 	if req.Order.FailUndo == "reserve" {
 		return fmt.Errorf("unreserve: warehouse unreachable for %s", req.Order.ID)
 	}
-	a.unmark(ctx)
 	return nil
 }

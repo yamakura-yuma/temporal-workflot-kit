@@ -21,7 +21,6 @@ func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) 
 	if req.Order.FailAt == "charge" {
 		return "", fmt.Errorf("charge: card declined for %s", req.Order.ID)
 	}
-	a.mark(ctx)
 	return "chg-" + req.Order.ID, nil
 }
 
@@ -30,13 +29,10 @@ func (a *Activities) Charge(ctx context.Context, req ChargeReq) (string, error) 
 // It is handed the same input the forward step got, so it knows which
 // reservation the charge belonged to without looking it up. A compensation
 // cannot see its own step's output -- it was registered before the step ran --
-// but everything upstream is right here.
+// but everything upstream is right here, in Reservation.
 func (a *Activities) Refund(ctx context.Context, req ChargeReq) error {
-	a.saw.Store("charge", req.Reservation)
-
 	if req.Order.FailUndo == "charge" {
 		return fmt.Errorf("refund: gateway unreachable for %s", req.Order.ID)
 	}
-	a.unmark(ctx)
 	return nil
 }

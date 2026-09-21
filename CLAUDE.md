@@ -32,9 +32,11 @@ Temporal のワークフローを書くための Go の部品集。今入って�
 - `example/activity/` — example のアクティビティ。**ワークフローごとではなく1セット**で、
   1アクティビティ1ファイル（`reserve.go`、`charge.go`、`ship.go`、`pack.go`）。各ファイルが
   入力型と forward と補償を持つ。`activity.go` に `Activities` 型と、仕様のための観測窓
-  （`Held`、`Upstream`、`KeySeenBy`）。アクティビティはワークフローではなくワーカーに
-  属するもので、同じ `Reserve` を order / pipeline / childflow / state が呼ぶ。
-  ディレクトリの形でそれを見せている
+  アクティビティはワークフローではなくワーカーに属するもので、同じ `Reserve` を
+  order / pipeline / childflow / state が呼ぶ。ディレクトリの形でそれを見せている。
+  **状態を持たせないこと**。下流への書き込みはアクティビティの副作用ではなく仕事
+  そのもので、記録は下流のもの。仕様が見るのはワークフロー履歴であって、
+  アクティビティの自己申告ではない
 - `example/workflow/` — ワークフロー。テーマごとに1パッケージで、中身は `workflow.go` と
   `diagram.html` だけ。**1パッケージにまとめない**（`TaskQueue`、`Order`、`Receipt` が
   6組ぶつかって全部に接頭辞が要るため）
